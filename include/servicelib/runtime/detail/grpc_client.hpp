@@ -390,6 +390,28 @@ class ClientPool final {
   boost::asio::awaitable<void> Stop() { return operations_.stopAndWait(); }
 
   template <auto PrepareAsync, typename Request, typename Response>
+  boost::asio::awaitable<Response> unary(
+      Request request, datasink::grpc::CallOptions options) {
+    auto operation = operations_.acquire();
+    if (!operation) throw std::runtime_error("gRPC client pool is stopped");
+    auto client = next();
+    // MessageContext owns cancellation. Do not destroy the RPC's storage
+    // until the transport has delivered its completion, including during Stop.
+    co_await boost::asio::this_coro::reset_cancellation_state(
+        boost::asio::disable_cancellation());
+    using RPC = agrpc::ClientRPC<PrepareAsync>;
+    ::grpc::ClientContext context;
+    detail::ClientCancellation cancellation(options.context, context);
+    InjectContext(options.context, context, options.tracingEnabled);
+    Response response;
+    auto status = co_await RPC::request(
+        context_, *client, context, request, response,
+        boost::asio::use_awaitable);
+    if (!status.ok()) throw StatusError(status);
+    co_return std::move(response);
+  }
+
+  template <auto PrepareAsync, typename Request, typename Response>
   void asyncUnary(
       Request request, datasink::grpc::CallOptions options,
       std::function<void(std::exception_ptr, std::optional<Response>)>

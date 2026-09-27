@@ -1,7 +1,14 @@
 #pragma once
 
 #include <functional>
-#include <servicelib/runtime/detail/sync.hpp>
+#include <memory>
+#include <type_traits>
+
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/async_result.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
 #include <servicelib/datasink/grpc/common.hpp>
 
@@ -60,7 +67,7 @@ class NoStreamingEndpoint final : public Endpoint<T, R, Handler, E> {
       try {
         if (!operation) throw std::runtime_error("gRPC sink endpoint is stopped");
         // The transport receives MessageContext cancellation. Keep the endpoint alive
-        // until its completion callback has retired, including on coroutine cancellation.
+        // until transport completion, including on coroutine cancellation.
         co_await boost::asio::this_coro::reset_cancellation_state(
             boost::asio::disable_cancellation());
         response.emplace(co_await callClient(std::move(*request),
@@ -89,29 +96,34 @@ class NoStreamingEndpoint final : public Endpoint<T, R, Handler, E> {
 
  private:
   boost::asio::awaitable<Res> callClient(Req request, CallOptions options) {
-    if constexpr (requires(ClientFunction& client, AsyncCompletion completion) {
+    if constexpr (std::is_invocable_v<ClientFunction&, Req, CallOptions>) {
+      co_return co_await std::invoke(client_, std::move(request), std::move(options));
+    } else if constexpr (requires(ClientFunction& client, AsyncCompletion completion) {
                     client.async(std::move(request), std::move(options),
                                  std::move(completion));
                   }) {
-      struct Pending final {
-        servicelib::detail::SingleUseEvent done;
-        std::exception_ptr error;
-        std::optional<Res> response;
-      };
-      auto pending = std::make_shared<Pending>();
-      client_.async(std::move(request), std::move(options),
-          [pending](std::exception_ptr error, std::optional<Res> response) {
-            pending->error = std::move(error);
-            pending->response = std::move(response);
-            pending->done.Send();
-          });
-      // The completion callback only publishes the transport result. Business
-      // handlers resume on the caller's executor, never on a CQ callback worker.
-      co_await pending->done.AsyncWait();
-      if (pending->error) std::rethrow_exception(pending->error);
-      if (!pending->response)
+      // Compatibility for callback-only clients: complete one Asio operation
+      // on the caller's executor without allocating an event or a channel.
+      auto response = co_await boost::asio::async_initiate<
+          decltype(boost::asio::use_awaitable),
+          void(std::exception_ptr, std::optional<Res>)>(
+          [this](auto handler, Req value, CallOptions callOptions) {
+            auto executor = boost::asio::get_associated_executor(handler);
+            auto work = boost::asio::make_work_guard(executor);
+            auto completion = std::make_shared<decltype(handler)>(std::move(handler));
+            client_.async(std::move(value), std::move(callOptions),
+                [completion, executor, work = std::move(work)](
+                    std::exception_ptr error, std::optional<Res> result) mutable {
+                  boost::asio::post(executor,
+                      [completion, work = std::move(work), error = std::move(error),
+                       result = std::move(result)]() mutable {
+                        (*completion)(std::move(error), std::move(result));
+                      });
+                });
+          }, boost::asio::use_awaitable, std::move(request), std::move(options));
+      if (!response)
         throw std::runtime_error("gRPC call returned no response");
-      co_return std::move(*pending->response);
+      co_return std::move(*response);
     } else {
       co_return co_await std::invoke(client_, std::move(request), std::move(options));
     }
