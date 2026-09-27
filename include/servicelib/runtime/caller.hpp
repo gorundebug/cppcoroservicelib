@@ -1,0 +1,519 @@
+/*
+ * caller.hpp
+ * C++ streams API — per-edge dispatch (Caller pattern)
+ *
+ * Copyright (c) 2024 Sergey Alexeev
+ * Email: sergeyalexeev@yahoo.com
+ *
+ *  Licensed under the MIT License. See the
+ * [LICENSE](https://opensource.org/licenses/MIT) file for details.
+ */
+#pragma once
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <servicelib/runtime/config/config.hpp>
+#include <servicelib/runtime/consumer.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/pool/pool.hpp>
+
+namespace servicelib {
+
+// ──────────────────────────────────────────────────────────────
+// ConsumeStatistics — atomic message counter per edge
+// Go analog: consumeStatistics / ConsumeStatistics
+// ──────────────────────────────────────────────────────────────
+class ConsumeStatistics {
+ public:
+  void inc() noexcept { count_.fetch_add(1, std::memory_order_relaxed); }
+  int64_t count() const noexcept {
+    return count_.load(std::memory_order_relaxed);
+  }
+
+ private:
+  std::atomic<int64_t> count_{0};
+};
+
+// ──────────────────────────────────────────────────────────────
+// CallerBase — type-erased base stored in the per-edge map.
+// Holds the fields shared by all Caller<T> implementations, independent of
+// T (Go analog: the embedded `caller[T]` struct — source/consumer stay in
+// the typed subclass since their type depends on T).
+// ──────────────────────────────────────────────────────────────
+class CallerBase {
+ public:
+  struct Params {
+    std::string sourceName;
+    std::string consumerName;
+    std::string pipeline;
+    std::string component;
+    std::shared_ptr<tracing::Tracer> tracer;  // nullable: tracing disabled
+    bool metricsEnabled{true};
+    std::unique_ptr<metrics::Int64Counter>
+        messagesCounter;  // never null (Noop default)
+  };
+
+  explicit CallerBase(Params params)
+      : sourceName_(std::move(params.sourceName)),
+        consumerName_(std::move(params.consumerName)),
+        pipeline_(std::move(params.pipeline)),
+        component_(std::move(params.component)),
+        tracer_(std::move(params.tracer)),
+        metricsEnabled_(params.metricsEnabled),
+        messagesCounter_(std::move(params.messagesCounter)) {
+    if (tracer_) {
+      callAttributes_.reserve(6);
+      callAttributes_.push_back(tracing::Attribute::String("from", sourceName_));
+      callAttributes_.push_back(tracing::Attribute::String("pipeline", pipeline_));
+      callAttributes_.push_back(tracing::Attribute::String("component", component_));
+      callAttributes_.push_back(tracing::Attribute::String("to", consumerName_));
+    }
+  }
+
+  virtual ~CallerBase() = default;
+  virtual bool isAsync() const noexcept = 0;
+
+  ConsumeStatistics& statistics() noexcept { return statistics_; }
+
+ protected:
+  void recordMessage() noexcept {
+    statistics_.inc();
+    if (!metricsEnabled_) return;
+    try {
+      messagesCounter_->inc();
+    } catch (...) {
+      // Telemetry must not change edge delivery semantics.
+    }
+  }
+
+  [[nodiscard]] bool samplingEnabled(
+      const MessageContext& context) const noexcept {
+    return tracer_ != nullptr && tracing::SamplingEnabled(context);
+  }
+
+  void configureCallAttributes(std::string_view type, std::string_view poolName = {}) {
+    if (!tracer_) return;
+    if (!type.empty()) callAttributes_.push_back(tracing::Attribute::String("type", std::string{type}));
+    if (!poolName.empty()) callAttributes_.push_back(tracing::Attribute::String("taskpoolname", std::string{poolName}));
+  }
+
+  [[nodiscard]] tracing::ActiveSpan startCallSpan(
+      MessageContext& context, std::string_view type = {},
+      std::string_view poolName = {}) const {
+    if (!samplingEnabled(context)) {
+      return {};
+    }
+    if (type.empty()) {
+      return tracing::StartSpanInPlace(
+          context, tracer_.get(), "stream.call",
+          std::span<const tracing::Attribute>{callAttributes_});
+    }
+    if (poolName.empty()) {
+      return tracing::StartSpanInPlace(
+          context, tracer_.get(), "stream.call",
+          {tracing::Attribute::String("from", sourceName_),
+           tracing::Attribute::String("pipeline", pipeline_),
+           tracing::Attribute::String("component", component_),
+           tracing::Attribute::String("to", consumerName_),
+           tracing::Attribute::String("type", std::string{type})});
+    }
+    return tracing::StartSpanInPlace(
+        context, tracer_.get(), "stream.call",
+        {tracing::Attribute::String("from", sourceName_),
+         tracing::Attribute::String("pipeline", pipeline_),
+           tracing::Attribute::String("component", component_),
+           tracing::Attribute::String("to", consumerName_),
+         tracing::Attribute::String("type", std::string{type}),
+         tracing::Attribute::String("taskpoolname", std::string{poolName})});
+  }
+
+  [[nodiscard]] std::shared_ptr<tracing::ActiveSpan> startAsyncCallSpan(
+      MessageContext& context, std::string_view type = {},
+      std::string_view poolName = {}) const {
+    if (!samplingEnabled(context)) {
+      return {};
+    }
+    return std::make_shared<tracing::ActiveSpan>(
+        startCallSpan(context, type, poolName));
+  }
+
+  std::vector<tracing::Attribute> callAttributes_;
+  std::string sourceName_;
+  std::string consumerName_;
+  std::string pipeline_;
+  std::string component_;
+  std::shared_ptr<tracing::Tracer> tracer_;
+  bool metricsEnabled_{};
+  std::unique_ptr<metrics::Int64Counter> messagesCounter_;
+
+ private:
+  ConsumeStatistics statistics_;
+};
+
+// ──────────────────────────────────────────────────────────────
+// Caller<T> — typed virtual interface
+// Go analog: Caller[T] interface = Consumer[T] + IsAsync()
+// ──────────────────────────────────────────────────────────────
+template <typename T, typename Consumer = StreamConsumer<T>>
+class Caller;
+
+template <typename T>
+class Caller<T, StreamConsumer<T>> : public CallerBase {
+ public:
+  using CallerBase::CallerBase;
+  [[nodiscard]] virtual boost::asio::awaitable<void> consume(
+      MessageContext ctx, Payload<T> payload) = 0;
+};
+
+// ──────────────────────────────────────────────────────────────
+// DirectCaller<T> — synchronous dispatch, no thread/pool
+// Go analog: directCaller[T]
+// ──────────────────────────────────────────────────────────────
+template <typename T, typename Consumer = StreamConsumer<T>>
+class DirectCaller final : public Caller<T> {
+ public:
+  DirectCaller(Consumer& consumer, CallerBase::Params params,
+               bool async = false)
+      : Caller<T>(std::move(params)), consumer_(consumer), async_(async) {}
+
+  [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext ctx, Payload<T> payload) override {
+    this->recordMessage();
+    tracing::ActiveSpan activeSpan;
+    if (this->samplingEnabled(ctx)) {
+      activeSpan = this->startCallSpan(ctx);
+    }
+    co_await consumer_.consume(std::move(ctx), std::move(payload));
+  }
+
+  bool isAsync() const noexcept override { return async_; }
+
+ private:
+  Consumer& consumer_;
+  bool async_{};
+};
+
+// ──────────────────────────────────────────────────────────────
+// TaskPoolCaller<T> — dispatch via ITaskPool (async, ordered by pool)
+// Go analog: taskPoolCaller[T]
+// ──────────────────────────────────────────────────────────────
+template <typename T, typename Consumer = StreamConsumer<T>>
+class TaskPoolCaller final : public Caller<T> {
+ public:
+  TaskPoolCaller(Consumer& consumer, pool::ITaskPool& pool,
+                 log::Logger& logger, CallerBase::Params params)
+      : Caller<T>(std::move(params)),
+        consumer_(consumer),
+        pool_(pool),
+        logger_(logger) {
+    if (this->tracer_) this->configureCallAttributes("taskpool", pool_.getName());
+  }
+
+  [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext ctx, Payload<T> payload) override {
+    this->recordMessage();
+    ctx = std::move(ctx).withoutCompletion();
+    std::shared_ptr<tracing::ActiveSpan> activeSpan;
+    if (this->samplingEnabled(ctx)) {
+      activeSpan = this->startAsyncCallSpan(ctx);
+    }
+    try {
+      pool_.addTask(ctx, [this, ctx, p = std::move(payload),
+                          activeSpan = std::move(activeSpan)]() mutable -> boost::asio::awaitable<void> {
+        (void)activeSpan;
+        co_await consumer_.consume(std::move(ctx), std::move(p));
+      });
+    } catch (const std::exception& e) {
+      try {
+        logger_.warn(
+            "task pool rejected task",
+            {log::Field::Str("pool", pool_.getName()), log::Field::Err(e)});
+      } catch (...) {
+        // Telemetry must not replace the pool's rejection semantics.
+      }
+    }
+    co_return;
+  }
+
+  bool isAsync() const noexcept override { return true; }
+
+ private:
+  Consumer& consumer_;
+  pool::ITaskPool& pool_;
+  log::Logger& logger_;
+};
+
+// ──────────────────────────────────────────────────────────────
+// PriorityTaskPoolCaller<T> — dispatch via IPriorityTaskPool
+// Priority comes from MessageContext when explicitly set (including zero),
+// otherwise it falls back to the configured default.
+// Go analog: priorityTaskPoolCaller[T]
+// ──────────────────────────────────────────────────────────────
+template <typename T, typename Consumer = StreamConsumer<T>>
+class PriorityTaskPoolCaller final : public Caller<T> {
+ public:
+  PriorityTaskPoolCaller(Consumer& consumer,
+                         pool::IPriorityTaskPool& pool, int priority,
+                         log::Logger& logger, CallerBase::Params params)
+      : Caller<T>(std::move(params)),
+        consumer_(consumer),
+        pool_(pool),
+        priority_(priority),
+        logger_(logger) {
+    if (this->tracer_) this->configureCallAttributes("prioritytaskpool", pool_.getName());
+  }
+
+  [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext ctx, Payload<T> payload) override {
+    this->recordMessage();
+    ctx = std::move(ctx).withoutCompletion();
+    const int prio = ctx.hasPriority() ? ctx.priority() : priority_;
+    std::shared_ptr<tracing::ActiveSpan> activeSpan;
+    if (this->samplingEnabled(ctx)) {
+      activeSpan =
+          this->startAsyncCallSpan(ctx);
+    }
+    try {
+      pool_.addTask(ctx, prio,
+                    [this, ctx, p = std::move(payload),
+                     activeSpan = std::move(activeSpan)]() mutable -> boost::asio::awaitable<void> {
+        (void)activeSpan;
+        co_await consumer_.consume(std::move(ctx), std::move(p));
+      });
+    } catch (const std::exception& e) {
+      try {
+        logger_.warn(
+            "priority task pool rejected task",
+            {log::Field::Str("pool", pool_.getName()), log::Field::Err(e)});
+      } catch (...) {
+        // Telemetry must not replace the pool's rejection semantics.
+      }
+    }
+    co_return;
+  }
+
+  bool isAsync() const noexcept override { return true; }
+
+ private:
+  Consumer& consumer_;
+  pool::IPriorityTaskPool& pool_;
+  int priority_;
+  log::Logger& logger_;
+};
+
+// ──────────────────────────────────────────────────────────────
+// ParallelCaller<T> — post one service-lifetime-tracked Asio task per message
+// Go analog: parallelCaller[T] (goroutine per message)
+// ──────────────────────────────────────────────────────────────
+template <typename T, typename Consumer = StreamConsumer<T>>
+class ParallelCaller final : public Caller<T> {
+ public:
+  ParallelCaller(Consumer& consumer, IRuntimeEnvironment& environment,
+                 CallerBase::Params params)
+      : Caller<T>(std::move(params)),
+        consumer_(consumer),
+        environment_(environment) {
+    this->configureCallAttributes("parallel");
+  }
+
+  [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext ctx, Payload<T> payload) override {
+    this->recordMessage();
+    ctx = std::move(ctx).withoutCompletion();
+    std::shared_ptr<tracing::ActiveSpan> activeSpan;
+    if (this->samplingEnabled(ctx)) {
+      activeSpan = this->startAsyncCallSpan(ctx);
+    }
+    environment_.parallel(
+        [this, ctx, p = std::move(payload),
+         activeSpan = std::move(activeSpan)]() mutable -> boost::asio::awaitable<void> {
+          (void)activeSpan;
+          co_await consumer_.consume(std::move(ctx), std::move(p));
+        });
+    co_return;
+  }
+
+  bool isAsync() const noexcept override { return true; }
+
+ private:
+  Consumer& consumer_;
+  IRuntimeEnvironment& environment_;
+};
+
+// ──────────────────────────────────────────────────────────────
+// makeCallerFromEnv<T> — factory selecting dispatch semantics
+// from RuntimeConfig link settings (or service default), and wiring up
+// metrics/tracing for the edge. Go analog: MakeCaller[T]
+// ──────────────────────────────────────────────────────────────
+// Non-owning typed view of a registered edge. The environment still owns the
+// implementation and its telemetry. Copying this view never creates a second
+// edge; it must not outlive the environment's callers or the consumer.
+template <typename T, typename Consumer>
+class Caller final {
+  static_assert(std::is_base_of_v<StreamConsumer<T>, Consumer>);
+
+  using Dispatch = std::variant<
+      DirectCaller<T, Consumer>*, TaskPoolCaller<T, Consumer>*,
+      PriorityTaskPoolCaller<T, Consumer>*, ParallelCaller<T, Consumer>*>;
+
+ public:
+  explicit Caller(Caller<T>& caller) : dispatch_(resolve(caller)) {}
+
+  [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext context, Payload<T> payload) const {
+    return std::visit(
+        [&](auto* caller) {
+          return caller->consume(std::move(context), std::move(payload));
+        },
+        dispatch_);
+  }
+
+  bool isAsync() const noexcept {
+    return std::visit(
+        [](auto* caller) { return caller->isAsync(); }, dispatch_);
+  }
+
+  ConsumeStatistics& statistics() const noexcept {
+    return std::visit(
+        [](auto* caller) -> ConsumeStatistics& {
+          return caller->statistics();
+        },
+        dispatch_);
+  }
+
+ private:
+  // Resolve once while building the graph, never on the message path. An edge
+  // first registered with an erased consumer cannot become statically typed
+  // without rebuilding it; reject that mismatch rather than duplicating it.
+  static Dispatch resolve(Caller<T>& caller) {
+    if (auto* value = dynamic_cast<DirectCaller<T, Consumer>*>(&caller)) {
+      return value;
+    }
+    if (auto* value = dynamic_cast<TaskPoolCaller<T, Consumer>*>(&caller)) {
+      return value;
+    }
+    if (auto* value =
+            dynamic_cast<PriorityTaskPoolCaller<T, Consumer>*>(&caller)) {
+      return value;
+    }
+    if (auto* value = dynamic_cast<ParallelCaller<T, Consumer>*>(&caller)) {
+      return value;
+    }
+    throw std::logic_error("stream link was prepared with a different consumer type");
+  }
+
+  Dispatch dispatch_;
+};
+
+// Preserve erased dispatch by default. A concrete Consumer is an explicit
+// opt-in, so existing factory calls retain their previous instantiations.
+template <typename T, typename Producer, typename Consumer = StreamConsumer<T>>
+std::unique_ptr<Caller<T>> makeCallerFromEnv(
+    Producer& producer, std::type_identity_t<Consumer>& consumer, IRuntimeEnvironment* env,
+    config::LinkID link, std::string sourceNameOverride = {}) {
+  const config::CallSemanticsGroup* semantics = nullptr;
+  const config::ServiceConfig* serviceConfig = nullptr;
+  std::shared_ptr<const config::RuntimeConfig> runtimeConfig;
+  std::shared_ptr<const config::ServiceConfig> serviceConfigSnapshot;
+
+  if (env) {
+    serviceConfigSnapshot = env->getServiceConfigSnapshot();
+    serviceConfig = serviceConfigSnapshot.get();
+    runtimeConfig = env->getRuntimeConfigSnapshot();
+    if (const auto* cfg = runtimeConfig.get()) {
+      if (const auto* linkConfig = cfg->GetLink(link.from, link.to)) {
+        if (linkConfig->callSemantics.has_value()) {
+          semantics = &linkConfig->callSemantics.value();
+        }
+      }
+      if (!semantics && serviceConfig &&
+          serviceConfig->defaultCallSemantics.has_value()) {
+        semantics = &serviceConfig->defaultCallSemantics.value();
+      }
+    }
+  }
+
+  CallerBase::Params params;
+  params.sourceName = producer.getName();
+  params.consumerName = consumer.getName();
+  if (runtimeConfig) {
+    if (const auto source = runtimeConfig->GetStreamConfigByID(link.from)) {
+      params.sourceName = source->GetName();
+    }
+    if (const auto target = runtimeConfig->GetStreamConfigByID(link.to)) {
+      params.consumerName = target->GetName();
+      params.pipeline = target->GetPipeline();
+      params.component = target->GetComponent();
+    }
+  }
+  if (!sourceNameOverride.empty()) {
+    params.sourceName = std::move(sourceNameOverride);
+  }
+
+  if (env) {
+    params.metricsEnabled = env->getMetrics().enabled();
+    metrics::Labels labels{
+        {"service", serviceConfig ? serviceConfig->name : std::string()},
+        {"from", params.sourceName},
+        {"to", params.consumerName},
+        {"pipeline", params.pipeline},
+        {"component", params.component},
+    };
+    auto scope = env->getMetrics().scope("stream", labels);
+    params.messagesCounter = scope->counter(
+        "messages_total", "Total number of messages processed by stream link");
+
+    if (auto* tr = env->getTracing()) {
+      params.tracer =
+          tr->tracer(serviceConfig ? serviceConfig->name : std::string());
+    }
+  } else {
+    params.metricsEnabled = false;
+    auto scope = metrics::NoopMetrics::instance().scope("", {});
+    params.messagesCounter = scope->counter("", "");
+  }
+
+  if (!semantics || semantics->functionCall.has_value()) {
+    const bool async = semantics && semantics->functionCall->async;
+    return std::make_unique<DirectCaller<T, Consumer>>(consumer, std::move(params),
+                                             async);
+  }
+
+  if (semantics->taskPool.has_value()) {
+    auto* p = env->getTaskPool(semantics->taskPool->poolName);
+    if (!p) {
+      throw std::runtime_error("task pool not found: " +
+                               semantics->taskPool->poolName);
+    }
+    return std::make_unique<TaskPoolCaller<T, Consumer>>(consumer, *p, env->getLogger(),
+                                               std::move(params));
+  }
+
+  if (semantics->priorityTaskPool.has_value()) {
+    auto* p = env->getPriorityTaskPool(semantics->priorityTaskPool->poolName);
+    if (!p) {
+      throw std::runtime_error("priority task pool not found: " +
+                               semantics->priorityTaskPool->poolName);
+    }
+    return std::make_unique<PriorityTaskPoolCaller<T, Consumer>>(
+        consumer, *p, semantics->priorityTaskPool->priority, env->getLogger(),
+        std::move(params));
+  }
+
+  if (semantics->parallelCall.has_value()) {
+    return std::make_unique<ParallelCaller<T, Consumer>>(consumer, *env,
+                                                std::move(params));
+  }
+
+  throw std::runtime_error("unsupported call semantics");
+}
+
+}  // namespace servicelib

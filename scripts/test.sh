@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+source "$ROOT/scripts/dependency-proxy-env.sh"
+"$ROOT/scripts/test-conan-install-contract.sh"
+
+if [[ -n "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR:-}" ]]; then
+  if [[ ! -d "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}" ]]; then
+    echo "C++ source cache does not exist: ${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}" >&2
+    exit 1
+  fi
+  set -- -v "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}:/servicegen-cpp-source-cache:ro"
+else
+  set --
+fi
+
+if [[ -n "${CPPBOOSTSERVICELIB_TEST_BUILD_VOLUME:-}" ]]; then
+  # Do not initialize the nested volume from a host-side build directory.
+  # Host CMake caches contain absolute paths that are invalid in the container.
+  set -- "$@" --mount \
+    "type=volume,source=${CPPBOOSTSERVICELIB_TEST_BUILD_VOLUME},target=/workspace/build,volume-nocopy"
+fi
+
+docker build \
+  --add-host "host.docker.internal:host-gateway" \
+  --build-arg "DEPENDENCY_DOCKER_REGISTRY=${DEPENDENCY_DOCKER_REGISTRY:-docker.io}" \
+  --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.org/simple}" \
+  --build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
+  --build-arg "DEPENDENCY_APT_UBUNTU_ARCHIVE_URL=${DEPENDENCY_APT_UBUNTU_ARCHIVE_URL:-}" \
+  --build-arg "DEPENDENCY_APT_UBUNTU_SECURITY_URL=${DEPENDENCY_APT_UBUNTU_SECURITY_URL:-}" \
+  --build-arg "DEPENDENCY_APT_UBUNTU_PORTS_URL=${DEPENDENCY_APT_UBUNTU_PORTS_URL:-}" \
+  -f "$ROOT/Dockerfile.cmake" -t cppcoroservicelib-build "$ROOT"
+docker run --rm \
+  --add-host "host.docker.internal:host-gateway" \
+  -e CCACHE_DIR=/ccache \
+  -e CCACHE_BASEDIR=/workspace \
+  -e CCACHE_COMPILERCHECK=content \
+  -e CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-20G}" \
+  -e CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-}" \
+  -e DEPENDENCY_GITHUB_RAW_URL="${DEPENDENCY_GITHUB_RAW_URL:-}" \
+  -e DEPENDENCY_CONAN_REMOTE_URL="${DEPENDENCY_CONAN_REMOTE_URL:-}" \
+  -v cppcoroservicelib-ccache:/ccache \
+  "$@" \
+  -v "$ROOT:/workspace" -w /workspace \
+  cppcoroservicelib-build \
+  bash -lc '
+    cache_reset=()
+    source_cache_args=()
+    if [[ -f /servicegen-cpp-source-cache/conformance-cache.cmake ]]; then
+      source_cache_args=(-C /servicegen-cpp-source-cache/conformance-cache.cmake)
+    fi
+    if [[ ! -d /servicegen-cpp-source-cache ]]; then
+      cache_reset=(-U "FETCHCONTENT_SOURCE_DIR_*" -U OTELCPP_PROTO_PATH)
+    fi
+    cmake --fresh -S . -B build/docker -G Ninja "${cache_reset[@]}" \
+      "${source_cache_args[@]}" \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_INSTALL_PREFIX=/workspace/build/docker-install \
+      -DCPPBOOSTSERVICELIB_BUILD_TESTS=ON \
+      -DCPPBOOSTSERVICELIB_ENABLE_KAFKA=ON \
+    && cmake --build build/docker --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
+    && ctest --test-dir build/docker --output-on-failure \
+    && cmake --install build/docker \
+    && cmake --fresh -S tests/consumer -B build/consumer -G Ninja \
+      -DCMAKE_PREFIX_PATH=/workspace/build/docker-install \
+    && cmake --build build/consumer --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
+    && ./build/consumer/cppboostservicelib_consumer
+  '

@@ -1,0 +1,392 @@
+#pragma once
+
+#include <servicelib/runtime/stream_tracing.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <exception>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+
+#include <servicelib/runtime/common.hpp>
+#include <servicelib/runtime/config/dataconnector_types.hpp>
+#include <servicelib/runtime/config/endpoint_types.hpp>
+#include <servicelib/runtime/datasink.hpp>
+#include <servicelib/runtime/detail/async_operations.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/environment/tracing/tracing.hpp>
+#include <servicelib/runtime/detail/http_types.hpp>
+
+namespace servicelib::datasink::grpc {
+
+template <typename Req>
+class Sender final {
+ public:
+  using Send = std::function<boost::asio::awaitable<void>(Req)>;
+  explicit Sender(Send send, std::shared_ptr<tracing::Span> requestSpan = {})
+      : send_(std::move(send)), span_(std::move(requestSpan)) {
+    if (!send_) throw std::invalid_argument("gRPC sender is empty");
+  }
+  boost::asio::awaitable<void> send(Req request) {
+    try {
+      co_await send_(std::move(request));
+      if (auto* traceSpan = span_.get()) traceSpan->addEvent("send");
+    } catch (...) {
+      if (auto* traceSpan = span_.get()) {
+        const auto message = tracing::ExceptionMessage(std::current_exception());
+        tracing::SpanError(traceSpan, message);
+        traceSpan->addEvent(
+            "send.error", {tracing::Attribute::String("error", message)});
+      }
+      throw;
+    }
+  }
+
+ private:
+  Send send_;
+  std::shared_ptr<tracing::Span> span_;
+};
+
+class ResultContext final {
+ public:
+  ResultContext() = default;
+  explicit ResultContext(std::function<boost::asio::awaitable<void>()> done) : done_(std::move(done)) {}
+  boost::asio::awaitable<void> done() {
+    if (done_) co_await done_();
+  }
+
+ private:
+  std::function<boost::asio::awaitable<void>()> done_;
+};
+
+template <typename T, typename R, typename E = std::exception_ptr>
+class StreamContext final : public servicelib::SinkStreamContext<T, R, E> {
+ public:
+  using Base = servicelib::SinkStreamContext<T, R, E>;
+  using ResultOutput = typename Base::ResultOutput;
+  using ErrorOutput = typename Base::ErrorOutput;
+
+  StreamContext(ResultOutput result = {}, ErrorOutput error = {})
+      : Base(std::move(result), std::move(error)) {}
+};
+
+class IEndpoint {
+ public:
+  virtual ~IEndpoint() = default;
+  [[nodiscard]] virtual int id() const noexcept = 0;
+  virtual void start(Context) = 0;
+  virtual boost::asio::awaitable<void> stop(Context) = 0;
+};
+
+class DataSink final {
+ public:
+  template <typename T, typename R, typename E>
+  [[nodiscard]] static std::shared_ptr<DataSink> make(
+      SinkEndpointStream<T, R, E>& stream) {
+    auto& environment = stream.environment();
+    return std::shared_ptr<DataSink>(new DataSink(
+        environment, connectorIdForEndpoint(environment, stream.endpointId())));
+  }
+  [[nodiscard]] int id() const noexcept { return connectorId_; }
+  [[nodiscard]] config::GrpcDataConnectorConfig config() const {
+    const auto runtime = environment_.getRuntimeConfigSnapshot();
+    const auto connector =
+        runtime ? runtime->GetDataConnectorByID(connectorId_) : std::nullopt;
+    const auto* grpc =
+        connector ? connector->template As<config::GrpcDataConnectorConfig>()
+                  : nullptr;
+    if (!grpc) throw std::invalid_argument("gRPC datasink config not found");
+    return *grpc;
+  }
+  void addEndpoint(std::shared_ptr<IEndpoint> endpoint) {
+    if (!endpoint) throw std::invalid_argument("gRPC endpoint is null");
+    const auto runtime = environment_.getRuntimeConfigSnapshot();
+    const auto endpointConfig =
+        runtime ? runtime->GetEndpointConfigByID(endpoint->id()) : std::nullopt;
+    if (!endpointConfig ||
+        endpointConfig->GetIdDataConnector() != connectorId_) {
+      throw std::invalid_argument("gRPC endpoint belongs to another connector");
+    }
+    for (const auto& existing : endpoints_) {
+      if (existing == endpoint) {
+        throw std::invalid_argument("duplicate data sink endpoint consumer");
+      }
+    }
+    endpointsById_.try_emplace(endpoint->id(), endpoint);
+    endpoints_.push_back(std::move(endpoint));
+  }
+  [[nodiscard]] std::shared_ptr<IEndpoint> endpoint(int id) const {
+    const auto it = endpointsById_.find(id);
+    return it == endpointsById_.end() ? nullptr : it->second;
+  }
+  void start(Context context) {
+    for (const auto& endpoint : endpoints_) endpoint->start(context);
+  }
+  boost::asio::awaitable<void> stop(Context context) {
+    // Shutdown must drain all groups even if the caller's coroutine is cancelled.
+    co_await boost::asio::this_coro::reset_cancellation_state(
+        boost::asio::disable_cancellation());
+    std::unordered_map<int, std::vector<std::shared_ptr<IEndpoint>>> groups;
+    for (const auto& endpoint : endpoints_) groups[endpoint->id()].push_back(endpoint);
+    struct Pending final {
+      std::mutex mutex;
+      std::size_t remaining{1};
+      std::exception_ptr error;
+      servicelib::detail::SingleUseEvent done;
+      void finish(std::exception_ptr failure) {
+        bool complete;
+        {
+          std::lock_guard lock(mutex);
+          if (!error) error = std::move(failure);
+          complete = --remaining == 0;
+        }
+        if (complete) done.Send();
+      }
+    };
+    auto pending = std::make_shared<Pending>();
+    auto executor = co_await boost::asio::this_coro::executor;
+    for (auto& group : groups) {
+      {
+        std::lock_guard lock(pending->mutex);
+        ++pending->remaining;
+      }
+      try {
+        boost::asio::co_spawn(executor,
+            [entries = std::move(group.second), context]() -> boost::asio::awaitable<void> {
+              // Different endpoint IDs run concurrently; one ID stops in reverse order.
+              for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+                co_await (*it)->stop(context);
+              }
+            },
+            [pending](std::exception_ptr error) { pending->finish(std::move(error)); });
+      } catch (...) {
+        pending->finish(std::current_exception());
+        break;
+      }
+    }
+    pending->finish({});
+    co_await pending->done.AsyncWait();
+    if (pending->error) std::rethrow_exception(pending->error);
+  }
+
+ private:
+  DataSink(IServiceEnvironment& environment, int connectorId)
+      : environment_(environment), connectorId_(connectorId) {
+    static_cast<void>(config());
+  }
+
+  [[nodiscard]] static int connectorIdForEndpoint(
+      IServiceEnvironment& environment, int endpointId) {
+    const auto runtime = environment.getRuntimeConfigSnapshot();
+    const auto endpoint =
+        runtime ? runtime->GetEndpointConfigByID(endpointId) : std::nullopt;
+    if (!endpoint) {
+      throw std::invalid_argument("gRPC datasink endpoint config not found");
+    }
+    return endpoint->GetIdDataConnector();
+  }
+
+  IServiceEnvironment& environment_;
+  int connectorId_;
+  std::vector<std::shared_ptr<IEndpoint>> endpoints_;
+  std::unordered_map<int, std::shared_ptr<IEndpoint>> endpointsById_;
+};
+
+struct CallOptions final {
+  MessageContext context;
+  bool tracingEnabled{true};
+};
+
+inline CallOptions callOptions(const MessageContext& context,
+                               bool tracingEnabled = true) {
+  return CallOptions{context, tracingEnabled};
+}
+
+template <typename T, typename R, typename Handler,
+          typename E = std::exception_ptr>
+class Endpoint : public IEndpoint {
+ public:
+  using State = typename Handler::State;
+  using ContextType = StreamContext<T, R, E>;
+
+ protected:
+  Endpoint(SinkEndpointStream<T, R, E>& stream,
+           api::GrpcMethodType expectedMethod, Handler handler)
+      : environment_(stream.environment()),
+        endpointId_(stream.endpointId()),
+        tracingEngineAvailable_(environment_.getTracing() != nullptr),
+        streamIdentity_(resolveStreamIdentity(environment_, stream.streamConfigId())),
+        endpointName_(endpointConfig().name),
+        serviceName_(resolveServiceName(environment_)),
+        handler_(std::move(handler)),
+        streamContext_(stream.resultOutput(), stream.errorOutput()),
+        metrics_(environment_.getMetrics(), environment_.getLogger(),
+                 connectorConfig().name, endpointName_, "grpc") {
+    if (endpointConfig().grpcMethodType != expectedMethod) {
+      throw std::invalid_argument("unexpected gRPC method type for endpoint");
+    }
+  }
+
+ public:
+  [[nodiscard]] int id() const noexcept override { return endpointId_; }
+  void start([[maybe_unused]] Context context) override {
+    asyncOperations_.start();
+  }
+  boost::asio::awaitable<void> stop([[maybe_unused]] Context context) override {
+    return asyncOperations_.stopAndWait();
+  }
+
+  [[nodiscard]] config::GrpcEndpointConfig endpointConfig() const {
+    const auto config = environment_.getRuntimeConfigSnapshot();
+    const auto endpoint =
+        config ? config->GetEndpointConfigByID(endpointId_) : std::nullopt;
+    const auto* grpc = endpoint
+                           ? endpoint->template As<config::GrpcEndpointConfig>()
+                           : nullptr;
+    if (!grpc) throw std::invalid_argument("gRPC endpoint config not found");
+    return *grpc;
+  }
+
+  [[nodiscard]] config::GrpcDataConnectorConfig connectorConfig() const {
+    const auto config = environment_.getRuntimeConfigSnapshot();
+    const auto endpoint = endpointConfig();
+    const auto connector =
+        config ? config->GetDataConnectorByID(endpoint.idDataConnector)
+               : std::nullopt;
+    const auto* grpc =
+        connector ? connector->template As<config::GrpcDataConnectorConfig>()
+                  : nullptr;
+    if (!grpc) throw std::invalid_argument("gRPC connector config not found");
+    return *grpc;
+  }
+
+ private:
+  IServiceEnvironment& environment_;
+  int endpointId_;
+  bool tracingEngineAvailable_;
+  StreamTraceIdentity streamIdentity_;
+  std::string endpointName_;
+  std::string serviceName_;
+
+ protected:
+  [[nodiscard]] bool tracingEnabled() const noexcept {
+    return tracingEngineAvailable_;
+  }
+
+  [[nodiscard]] tracing::ActiveSpan startTrace(MessageContext& context) {
+    if (!tracingEngineAvailable_ || !tracing::SamplingEnabled(context)) return {};
+    auto* tracingEngine = environment_.getTracing();
+    if (!tracingEngine) {
+      return {};
+    }
+    auto tracer = tracingEngine->tracer(serviceName_);
+    if (!tracer) {
+      return {};
+    }
+    return tracing::StartSpanInPlace(
+        context, tracer.get(), "grpc.output",
+        {
+            tracing::Attribute::String("stream", streamIdentity_.name),
+            tracing::Attribute::String("pipeline", streamIdentity_.pipeline),
+            tracing::Attribute::String("component", streamIdentity_.component),
+            tracing::Attribute::String("endpoint", endpointName_),
+        });
+  }
+
+  struct DetachedTrace final {
+    MessageContext context;
+    std::shared_ptr<tracing::Span> span;
+  };
+
+  [[nodiscard]] DetachedTrace startDetachedTrace(MessageContext context) {
+    if (!tracingEngineAvailable_ || !tracing::SamplingEnabled(context))
+      return {std::move(context), {}};
+    auto* tracingEngine = environment_.getTracing();
+    if (!tracingEngine) {
+      return {std::move(context), {}};
+    }
+    auto tracer = tracingEngine->tracer(serviceName_);
+    if (!tracer) {
+      return {std::move(context), {}};
+    }
+    auto parent = context.trace();
+    if (!parent.isValid()) parent = tracer->currentSpanContext();
+    auto span = tracer->startDetachedChildOf(
+        "grpc.output", parent,
+        {
+            tracing::Attribute::String("stream", streamIdentity_.name),
+            tracing::Attribute::String("pipeline", streamIdentity_.pipeline),
+            tracing::Attribute::String("component", streamIdentity_.component),
+            tracing::Attribute::String("endpoint", endpointName_),
+        });
+    if (span) context = std::move(context).withTrace(span->spanContext());
+    return {std::move(context), std::move(span)};
+  }
+
+  static void traceError(tracing::Span* span, const std::exception_ptr& error,
+                         std::string_view event = {}) {
+    if (!span) return;
+    const auto message = tracing::ExceptionMessage(error);
+    tracing::SpanError(span, message);
+    if (!event.empty()) {
+      span->addEvent(event, {tracing::Attribute::String("error", message)});
+    }
+  }
+
+  MessageContext ensureStreamId(MessageContext context) const {
+    if (context.streamId().empty()) {
+      context = std::move(context).withStreamId(servicelib::http::NewStreamId());
+    }
+    return context;
+  }
+
+  MessageContext newRequestStreamId(MessageContext context) const {
+    return std::move(context).withStreamId(servicelib::http::NewStreamId());
+  }
+
+  boost::asio::awaitable<void> callEnd(MessageContext context, std::exception_ptr error,
+               State& state) {
+    try {
+      co_await handler_.endRequest(std::move(context), streamContext_, error, state);
+    } catch (...) {
+      // EndRequest is noexcept by the Go-compatible handler contract.
+    }
+  }
+
+  Handler handler_;
+  ContextType streamContext_;
+  DataSinkEndpointMetrics metrics_;
+  servicelib::detail::AsyncOperations asyncOperations_;
+
+ private:
+  [[nodiscard]] static StreamTraceIdentity resolveStreamIdentity(
+      const IServiceEnvironment& environment, std::size_t streamConfigId) {
+    const auto runtime = environment.getRuntimeConfigSnapshot();
+    if (!runtime || streamConfigId == 0) return {};
+    const auto stream = runtime->GetStreamConfigByID(
+        static_cast<int>(streamConfigId));
+    return stream ? StreamTraceIdentity{stream->GetName(), stream->GetPipeline(),
+                                        stream->GetComponent()}
+                  : StreamTraceIdentity{};
+  }
+
+  [[nodiscard]] static std::string resolveServiceName(
+      const IServiceEnvironment& environment) {
+    const auto service = environment.getServiceConfigSnapshot();
+    return service ? service->name : std::string{};
+  }
+};
+
+}  // namespace servicelib::datasink::grpc
