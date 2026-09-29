@@ -11,7 +11,7 @@ add_library(cppcoro_dns STATIC src/runtime/coro_resolver.cpp)
 target_compile_features(cppcoro_dns PUBLIC cxx_std_20)
 target_include_directories(cppcoro_dns PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(cppcoro_dns PUBLIC
-    $<BUILD_INTERFACE:Boost::headers>
+    $<BUILD_INTERFACE:Boost::asio>
     Threads::Threads cppcoro_io
     PRIVATE ${_coro_cares} $<BUILD_INTERFACE:cppcoroservicelib_build_options>)
 set_target_properties(cppcoro_dns PROPERTIES

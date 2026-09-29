@@ -114,7 +114,7 @@ function(_servicelib_normalize_librdkafka_cmake_config config_path)
 endfunction()
 
 if(CPPCOROSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
-  find_package(Boost 1.83 REQUIRED COMPONENTS json context GLOBAL)
+  find_package(Boost 1.89 REQUIRED COMPONENTS json context GLOBAL)
   find_package(yaml-cpp 0.7 REQUIRED GLOBAL)
 elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
   _servicelib_require_local(Boost "${CPPCOROSERVICELIB_BOOST_SOURCE_DIR}")
