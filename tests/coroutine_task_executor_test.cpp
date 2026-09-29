@@ -17,6 +17,12 @@ namespace {
 namespace asio = boost::asio;
 using servicelib::detail::TaskExecutor;
 
+TEST(CoroutineTaskExecutor, FitsInAsioExecutorInlineStorage) {
+  // Boost.Asio keeps executors of this size inline instead of using its
+  // separately reference-counted shared_target_executor allocation.
+  EXPECT_LE(sizeof(TaskExecutor), 3 * sizeof(void*));
+}
+
 asio::awaitable<void> CheckNestedOwner(const void* expected, const void* other) {
   for (int i = 0; i != 100; ++i) {
     const auto before = co_await asio::this_coro::executor;

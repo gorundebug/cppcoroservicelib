@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <utility>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -15,11 +16,11 @@ namespace servicelib::detail {
 class TaskExecutor final {
  public:
   TaskExecutor(boost::asio::any_io_executor executor, const void* owner)
-      : executor_(std::move(executor)), owner_(owner) {}
+      : state_(std::make_shared<State>(std::move(executor), owner)) {}
 
   template <typename Function>
   void execute(Function&& function) const {
-    executor_.execute(std::forward<Function>(function));
+    state_->executor.execute(std::forward<Function>(function));
   }
 
   template <typename Property>
@@ -28,37 +29,44 @@ class TaskExecutor final {
           std::declval<const boost::asio::any_io_executor&>(), property)))
       -> decltype(boost::asio::query(
           std::declval<const boost::asio::any_io_executor&>(), property)) {
-    return boost::asio::query(executor_, property);
+    return boost::asio::query(state_->executor, property);
   }
 
   template <typename Property>
     requires boost::asio::can_require<
         const boost::asio::any_io_executor&, Property>::value
   TaskExecutor require(const Property& property) const {
-    return {boost::asio::require(executor_, property), owner_};
+    return {boost::asio::require(state_->executor, property), state_->owner};
   }
 
   template <typename Property>
     requires boost::asio::can_prefer<
         const boost::asio::any_io_executor&, Property>::value
   TaskExecutor prefer(const Property& property) const {
-    return {boost::asio::prefer(executor_, property), owner_};
+    return {boost::asio::prefer(state_->executor, property), state_->owner};
   }
 
   [[nodiscard]] static bool owns(
       const boost::asio::any_io_executor& executor, const void* owner) noexcept {
     const auto* task = executor.target<TaskExecutor>();
-    return task && task->owner_ == owner;
+    return task && task->state_->owner == owner;
   }
 
   friend bool operator==(const TaskExecutor& left,
                          const TaskExecutor& right) noexcept {
-    return left.executor_ == right.executor_ && left.owner_ == right.owner_;
+    return left.state_->executor == right.state_->executor &&
+           left.state_->owner == right.state_->owner;
   }
 
  private:
-  boost::asio::any_io_executor executor_;
-  const void* owner_;
+  struct State {
+    State(boost::asio::any_io_executor value, const void* valueOwner)
+        : executor(std::move(value)), owner(valueOwner) {}
+    boost::asio::any_io_executor executor;
+    const void* owner;
+  };
+
+  std::shared_ptr<const State> state_;
 };
 
 }  // namespace servicelib::detail
