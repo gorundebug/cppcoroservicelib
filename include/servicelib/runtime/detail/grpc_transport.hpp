@@ -1,4 +1,5 @@
 #pragma once
+#include <servicelib/runtime/detail/grpc_client_common.hpp>
 
 #include <servicelib/runtime/detail/grpc_context.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
@@ -135,33 +136,6 @@ void ObserveServerCancellation(RPC& rpc, ServerCancellation& cancellation,
   rpc.wait_for_done(ServerCancellationCallback<RPC>{
       rpc, cancellation, std::move(executor)});
 }
-
-class ClientCancellation final {
- public:
-  ClientCancellation(const MessageContext& message, grpc::ClientContext& rpc) {
-    Add(message.stopToken(), rpc);
-    for (const auto& token : message.externalStopTokens()) Add(token, rpc);
-  }
-
- private:
-  struct Cancel final {
-    grpc::ClientContext* rpc;
-    void operator()() const noexcept { rpc->TryCancel(); }
-  };
-  using Callback = std::stop_callback<Cancel>;
-  void Add(std::stop_token token, grpc::ClientContext& rpc) {
-    if (!token.stop_possible()) return;
-    if (!firstCallback_) {
-      firstCallback_.emplace(token, Cancel{&rpc});
-    } else {
-      callbacks_.push_back(std::make_unique<Callback>(token, Cancel{&rpc}));
-    }
-  }
-  // stop_callback cannot move once registered. Keep the first registration
-  // in place and use stable heap addresses only for additional stop sources.
-  std::optional<Callback> firstCallback_;
-  std::vector<std::unique_ptr<Callback>> callbacks_;
-};
 
 }  // namespace detail
 

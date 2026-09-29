@@ -5,21 +5,21 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 source "$ROOT/scripts/dependency-proxy-env.sh"
 "$ROOT/scripts/test-conan-install-contract.sh"
 
-if [[ -n "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR:-}" ]]; then
-  if [[ ! -d "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}" ]]; then
-    echo "C++ source cache does not exist: ${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}" >&2
+if [[ -n "${CPPCOROSERVICELIB_TEST_SOURCE_CACHE_DIR:-}" ]]; then
+  if [[ ! -d "${CPPCOROSERVICELIB_TEST_SOURCE_CACHE_DIR}" ]]; then
+    echo "C++ source cache does not exist: ${CPPCOROSERVICELIB_TEST_SOURCE_CACHE_DIR}" >&2
     exit 1
   fi
-  set -- -v "${CPPBOOSTSERVICELIB_TEST_SOURCE_CACHE_DIR}:/servicegen-cpp-source-cache:ro"
+  set -- -v "${CPPCOROSERVICELIB_TEST_SOURCE_CACHE_DIR}:/servicegen-cpp-source-cache:ro"
 else
   set --
 fi
 
-if [[ -n "${CPPBOOSTSERVICELIB_TEST_BUILD_VOLUME:-}" ]]; then
+if [[ -n "${CPPCOROSERVICELIB_TEST_BUILD_VOLUME:-}" ]]; then
   # Do not initialize the nested volume from a host-side build directory.
   # Host CMake caches contain absolute paths that are invalid in the container.
   set -- "$@" --mount \
-    "type=volume,source=${CPPBOOSTSERVICELIB_TEST_BUILD_VOLUME},target=/workspace/build,volume-nocopy"
+    "type=volume,source=${CPPCOROSERVICELIB_TEST_BUILD_VOLUME},target=/workspace/build,volume-nocopy"
 fi
 
 docker build \
@@ -57,13 +57,13 @@ docker run --rm \
       "${source_cache_args[@]}" \
       -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_INSTALL_PREFIX=/workspace/build/docker-install \
-      -DCPPBOOSTSERVICELIB_BUILD_TESTS=ON \
-      -DCPPBOOSTSERVICELIB_ENABLE_KAFKA=ON \
+      -DCPPCOROSERVICELIB_BUILD_TESTS=ON \
+      -DCPPCOROSERVICELIB_ENABLE_KAFKA=ON \
     && cmake --build build/docker --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
     && ctest --test-dir build/docker --output-on-failure \
     && cmake --install build/docker \
     && cmake --fresh -S tests/consumer -B build/consumer -G Ninja \
       -DCMAKE_PREFIX_PATH=/workspace/build/docker-install \
     && cmake --build build/consumer --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
-    && ./build/consumer/cppboostservicelib_consumer
+    && ./build/consumer/cppcoroservicelib_consumer
   '

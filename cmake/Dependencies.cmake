@@ -1,30 +1,30 @@
 include(FetchContent)
 include(${CMAKE_CURRENT_LIST_DIR}/DependencyVersions.cmake)
 
-set(CPPBOOSTSERVICELIB_DEPENDENCY_MODE "SYSTEM" CACHE STRING
+set(CPPCOROSERVICELIB_DEPENDENCY_MODE "SYSTEM" CACHE STRING
     "Dependency provider: CONAN, SYSTEM, LOCAL or FETCH")
-set_property(CACHE CPPBOOSTSERVICELIB_DEPENDENCY_MODE PROPERTY STRINGS
+set_property(CACHE CPPCOROSERVICELIB_DEPENDENCY_MODE PROPERTY STRINGS
     CONAN SYSTEM LOCAL FETCH)
 
-option(CPPBOOSTSERVICELIB_ENABLE_GRPC "Build asio-grpc transport" OFF)
-option(CPPBOOSTSERVICELIB_ENABLE_KAFKA "Build librdkafka transport" OFF)
-option(CPPBOOSTSERVICELIB_ENABLE_OTEL "Build OpenTelemetry exporters" OFF)
-option(CPPBOOSTSERVICELIB_ENABLE_CRON "Build the libcron data source" ON)
-option(CPPBOOSTSERVICELIB_FETCH_PROGRESS
+option(CPPCOROSERVICELIB_ENABLE_GRPC "Build asio-grpc transport" OFF)
+option(CPPCOROSERVICELIB_ENABLE_KAFKA "Build librdkafka transport" OFF)
+option(CPPCOROSERVICELIB_ENABLE_OTEL "Build OpenTelemetry exporters" OFF)
+option(CPPCOROSERVICELIB_ENABLE_CRON "Build the libcron data source" ON)
+option(CPPCOROSERVICELIB_FETCH_PROGRESS
        "Show FetchContent download and Git clone progress" ON)
-if(CPPBOOSTSERVICELIB_FETCH_PROGRESS)
+if(CPPCOROSERVICELIB_FETCH_PROGRESS)
   set(FETCHCONTENT_QUIET OFF)
 endif()
 
-if(CPPBOOSTSERVICELIB_ENABLE_CRON AND
-   CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "CONAN")
+if(CPPCOROSERVICELIB_ENABLE_CRON AND
+   CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "CONAN")
   find_package(libcron CONFIG REQUIRED GLOBAL)
-elseif(CPPBOOSTSERVICELIB_ENABLE_CRON)
+elseif(CPPCOROSERVICELIB_ENABLE_CRON)
   FetchContent_Declare(libcron
-      URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/PerMalmberg/libcron/archive/refs/tags/${CPPBOOSTSERVICELIB_LIBCRON_VERSION}.tar.gz"
+      URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/PerMalmberg/libcron/archive/refs/tags/${CPPCOROSERVICELIB_LIBCRON_VERSION}.tar.gz"
       DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
   FetchContent_Declare(libcron_date
-      URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/HowardHinnant/date/archive/${CPPBOOSTSERVICELIB_LIBCRON_DATE_REVISION}.tar.gz"
+      URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/HowardHinnant/date/archive/${CPPCOROSERVICELIB_LIBCRON_DATE_REVISION}.tar.gz"
       DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
   FetchContent_GetProperties(libcron)
   if(NOT libcron_POPULATED)
@@ -36,16 +36,16 @@ elseif(CPPBOOSTSERVICELIB_ENABLE_CRON)
   endif()
 endif()
 
-set(CPPBOOSTSERVICELIB_BOOST_SOURCE_DIR "" CACHE PATH "Local Boost source")
-set(CPPBOOSTSERVICELIB_YAML_CPP_SOURCE_DIR "" CACHE PATH "Local yaml-cpp source")
-set(CPPBOOSTSERVICELIB_PROTOBUF_SOURCE_DIR "" CACHE PATH "Local protobuf source")
-set(CPPBOOSTSERVICELIB_GRPC_SOURCE_DIR "" CACHE PATH "Local gRPC source")
-set(CPPBOOSTSERVICELIB_ASIO_GRPC_SOURCE_DIR "" CACHE PATH "Local asio-grpc source")
-set(CPPBOOSTSERVICELIB_RDKAFKA_SOURCE_DIR "" CACHE PATH "Local librdkafka source")
-set(CPPBOOSTSERVICELIB_OPENTELEMETRY_SOURCE_DIR "" CACHE PATH "Local OpenTelemetry source")
-set(CPPBOOSTSERVICELIB_HOST_PROTOC_EXECUTABLE "" CACHE FILEPATH
+set(CPPCOROSERVICELIB_BOOST_SOURCE_DIR "" CACHE PATH "Local Boost source")
+set(CPPCOROSERVICELIB_YAML_CPP_SOURCE_DIR "" CACHE PATH "Local yaml-cpp source")
+set(CPPCOROSERVICELIB_PROTOBUF_SOURCE_DIR "" CACHE PATH "Local protobuf source")
+set(CPPCOROSERVICELIB_GRPC_SOURCE_DIR "" CACHE PATH "Local gRPC source")
+set(CPPCOROSERVICELIB_ASIO_GRPC_SOURCE_DIR "" CACHE PATH "Local asio-grpc source")
+set(CPPCOROSERVICELIB_RDKAFKA_SOURCE_DIR "" CACHE PATH "Local librdkafka source")
+set(CPPCOROSERVICELIB_OPENTELEMETRY_SOURCE_DIR "" CACHE PATH "Local OpenTelemetry source")
+set(CPPCOROSERVICELIB_HOST_PROTOC_EXECUTABLE "" CACHE FILEPATH
     "Pinned uninstrumented protoc used only for sanitizer build-time code generation")
-set(CPPBOOSTSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE "" CACHE FILEPATH
+set(CPPCOROSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE "" CACHE FILEPATH
     "Pinned uninstrumented grpc_cpp_plugin used only for sanitizer build-time code generation")
 
 function(_servicelib_require_local name directory)
@@ -66,9 +66,9 @@ function(_servicelib_prepare_otel_package_bridge)
   file(MAKE_DIRECTORY "${_bridge}")
   file(WRITE "${_bridge}/gRPCConfig.cmake"
        "set(gRPC_FOUND TRUE)\n")
-  if(CPPBOOSTSERVICELIB_HOST_PROTOC_EXECUTABLE)
+  if(CPPCOROSERVICELIB_HOST_PROTOC_EXECUTABLE)
     set(_servicelib_otel_protoc
-        "${CPPBOOSTSERVICELIB_HOST_PROTOC_EXECUTABLE}")
+        "${CPPCOROSERVICELIB_HOST_PROTOC_EXECUTABLE}")
   else()
     set(_servicelib_otel_protoc "protobuf::protoc")
   endif()
@@ -113,69 +113,69 @@ function(_servicelib_normalize_librdkafka_cmake_config config_path)
   endif()
 endfunction()
 
-if(CPPBOOSTSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
+if(CPPCOROSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
   find_package(Boost 1.83 REQUIRED COMPONENTS json context GLOBAL)
   find_package(yaml-cpp 0.7 REQUIRED GLOBAL)
-elseif(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
-  _servicelib_require_local(Boost "${CPPBOOSTSERVICELIB_BOOST_SOURCE_DIR}")
-  _servicelib_require_local(yaml-cpp "${CPPBOOSTSERVICELIB_YAML_CPP_SOURCE_DIR}")
-  add_subdirectory("${CPPBOOSTSERVICELIB_BOOST_SOURCE_DIR}"
+elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
+  _servicelib_require_local(Boost "${CPPCOROSERVICELIB_BOOST_SOURCE_DIR}")
+  _servicelib_require_local(yaml-cpp "${CPPCOROSERVICELIB_YAML_CPP_SOURCE_DIR}")
+  add_subdirectory("${CPPCOROSERVICELIB_BOOST_SOURCE_DIR}"
                    "${CMAKE_BINARY_DIR}/_deps/boost" EXCLUDE_FROM_ALL)
-  add_subdirectory("${CPPBOOSTSERVICELIB_YAML_CPP_SOURCE_DIR}"
+  add_subdirectory("${CPPCOROSERVICELIB_YAML_CPP_SOURCE_DIR}"
                    "${CMAKE_BINARY_DIR}/_deps/yaml-cpp" EXCLUDE_FROM_ALL)
-  set(CPPBOOSTSERVICELIB_BOOST_BUILD_INCLUDE_DIR
-      "${CPPBOOSTSERVICELIB_BOOST_SOURCE_DIR}")
-  set(CPPBOOSTSERVICELIB_YAML_BUILD_INCLUDE_DIR
-      "${CPPBOOSTSERVICELIB_YAML_CPP_SOURCE_DIR}/include")
-  set(CPPBOOSTSERVICELIB_YAML_BUILD_LIBRARY
+  set(CPPCOROSERVICELIB_BOOST_BUILD_INCLUDE_DIR
+      "${CPPCOROSERVICELIB_BOOST_SOURCE_DIR}")
+  set(CPPCOROSERVICELIB_YAML_BUILD_INCLUDE_DIR
+      "${CPPCOROSERVICELIB_YAML_CPP_SOURCE_DIR}/include")
+  set(CPPCOROSERVICELIB_YAML_BUILD_LIBRARY
       "${CMAKE_BINARY_DIR}/_deps/yaml-cpp/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
-elseif(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "FETCH")
+elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "FETCH")
   set(BOOST_INCLUDE_LIBRARIES asio beast json context CACHE STRING "" FORCE)
   FetchContent_Declare(boost
-      URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/boostorg/boost/releases/download/boost-${CPPBOOSTSERVICELIB_BOOST_VERSION}/boost-${CPPBOOSTSERVICELIB_BOOST_VERSION}-cmake.tar.xz")
+      URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/boostorg/boost/releases/download/boost-${CPPCOROSERVICELIB_BOOST_VERSION}/boost-${CPPCOROSERVICELIB_BOOST_VERSION}-cmake.tar.xz")
   set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(yaml-cpp
-      URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/jbeder/yaml-cpp/archive/refs/tags/${CPPBOOSTSERVICELIB_YAML_CPP_VERSION}.tar.gz"
+      URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/jbeder/yaml-cpp/archive/refs/tags/${CPPCOROSERVICELIB_YAML_CPP_VERSION}.tar.gz"
       DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
   FetchContent_MakeAvailable(boost yaml-cpp)
-  set(CPPBOOSTSERVICELIB_BOOST_BUILD_INCLUDE_DIR "${boost_SOURCE_DIR}")
-  set(CPPBOOSTSERVICELIB_YAML_BUILD_INCLUDE_DIR "${yaml-cpp_SOURCE_DIR}/include")
-  set(CPPBOOSTSERVICELIB_YAML_BUILD_LIBRARY
+  set(CPPCOROSERVICELIB_BOOST_BUILD_INCLUDE_DIR "${boost_SOURCE_DIR}")
+  set(CPPCOROSERVICELIB_YAML_BUILD_INCLUDE_DIR "${yaml-cpp_SOURCE_DIR}/include")
+  set(CPPCOROSERVICELIB_YAML_BUILD_LIBRARY
       "${yaml-cpp_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
 else()
-  message(FATAL_ERROR "Unknown CPPBOOSTSERVICELIB_DEPENDENCY_MODE: ${CPPBOOSTSERVICELIB_DEPENDENCY_MODE}")
+  message(FATAL_ERROR "Unknown CPPCOROSERVICELIB_DEPENDENCY_MODE: ${CPPCOROSERVICELIB_DEPENDENCY_MODE}")
 endif()
 
-if(CPPBOOSTSERVICELIB_BUILD_TESTS)
+if(CPPCOROSERVICELIB_BUILD_TESTS)
   find_package(GTest QUIET GLOBAL)
   if(NOT TARGET GTest::gtest_main)
-    if(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "CONAN")
+    if(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "CONAN")
       message(FATAL_ERROR
           "Conan dependency graph did not provide GTest::gtest_main")
     endif()
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(googletest
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/google/googletest/archive/refs/tags/${CPPBOOSTSERVICELIB_GOOGLETEST_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/google/googletest/archive/refs/tags/${CPPCOROSERVICELIB_GOOGLETEST_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_MakeAvailable(googletest)
   endif()
 endif()
 
-if(CPPBOOSTSERVICELIB_ENABLE_GRPC)
-  if(CPPBOOSTSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
+if(CPPCOROSERVICELIB_ENABLE_GRPC)
+  if(CPPCOROSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
     find_package(Protobuf CONFIG REQUIRED GLOBAL)
     find_package(gRPC CONFIG REQUIRED GLOBAL)
     find_package(asio-grpc CONFIG REQUIRED GLOBAL)
-  elseif(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
-    _servicelib_require_local(protobuf "${CPPBOOSTSERVICELIB_PROTOBUF_SOURCE_DIR}")
-    _servicelib_require_local(gRPC "${CPPBOOSTSERVICELIB_GRPC_SOURCE_DIR}")
-    _servicelib_require_local(asio-grpc "${CPPBOOSTSERVICELIB_ASIO_GRPC_SOURCE_DIR}")
-    add_subdirectory("${CPPBOOSTSERVICELIB_PROTOBUF_SOURCE_DIR}"
+  elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
+    _servicelib_require_local(protobuf "${CPPCOROSERVICELIB_PROTOBUF_SOURCE_DIR}")
+    _servicelib_require_local(gRPC "${CPPCOROSERVICELIB_GRPC_SOURCE_DIR}")
+    _servicelib_require_local(asio-grpc "${CPPCOROSERVICELIB_ASIO_GRPC_SOURCE_DIR}")
+    add_subdirectory("${CPPCOROSERVICELIB_PROTOBUF_SOURCE_DIR}"
                      "${CMAKE_BINARY_DIR}/_deps/protobuf" EXCLUDE_FROM_ALL)
-    add_subdirectory("${CPPBOOSTSERVICELIB_GRPC_SOURCE_DIR}"
+    add_subdirectory("${CPPCOROSERVICELIB_GRPC_SOURCE_DIR}"
                      "${CMAKE_BINARY_DIR}/_deps/grpc" EXCLUDE_FROM_ALL)
-    add_subdirectory("${CPPBOOSTSERVICELIB_ASIO_GRPC_SOURCE_DIR}"
+    add_subdirectory("${CPPCOROSERVICELIB_ASIO_GRPC_SOURCE_DIR}"
                      "${CMAKE_BINARY_DIR}/_deps/asio-grpc" EXCLUDE_FROM_ALL)
   else()
     set(gRPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -213,30 +213,30 @@ if(CPPBOOSTSERVICELIB_ENABLE_GRPC)
     set(gRPC_SSL_PROVIDER package CACHE STRING "" FORCE)
     set(gRPC_ZLIB_PROVIDER package CACHE STRING "" FORCE)
     FetchContent_Declare(grpc
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/grpc/grpc/archive/refs/tags/${CPPBOOSTSERVICELIB_GRPC_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/grpc/grpc/archive/refs/tags/${CPPCOROSERVICELIB_GRPC_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_GetProperties(grpc)
     if(NOT grpc_POPULATED)
       FetchContent_Populate(grpc)
     endif()
     FetchContent_Declare(grpc-abseil
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/abseil/abseil-cpp/archive/${CPPBOOSTSERVICELIB_GRPC_ABSEIL_REVISION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/abseil/abseil-cpp/archive/${CPPCOROSERVICELIB_GRPC_ABSEIL_REVISION}.tar.gz"
         SOURCE_DIR "${grpc_SOURCE_DIR}/third_party/abseil-cpp"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_Declare(grpc-cares
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/c-ares/c-ares/archive/${CPPBOOSTSERVICELIB_GRPC_CARES_REVISION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/c-ares/c-ares/archive/${CPPCOROSERVICELIB_GRPC_CARES_REVISION}.tar.gz"
         SOURCE_DIR "${grpc_SOURCE_DIR}/third_party/cares/cares"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_Declare(grpc-protobuf
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/protocolbuffers/protobuf/archive/${CPPBOOSTSERVICELIB_GRPC_PROTOBUF_REVISION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/protocolbuffers/protobuf/archive/${CPPCOROSERVICELIB_GRPC_PROTOBUF_REVISION}.tar.gz"
         SOURCE_DIR "${grpc_SOURCE_DIR}/third_party/protobuf"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_Declare(grpc-re2
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/google/re2/archive/${CPPBOOSTSERVICELIB_GRPC_RE2_REVISION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/google/re2/archive/${CPPCOROSERVICELIB_GRPC_RE2_REVISION}.tar.gz"
         SOURCE_DIR "${grpc_SOURCE_DIR}/third_party/re2"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_Declare(grpc-opencensus-proto
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/census-instrumentation/opencensus-proto/archive/refs/tags/${CPPBOOSTSERVICELIB_GRPC_OPENCENSUS_PROTO_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/census-instrumentation/opencensus-proto/archive/refs/tags/${CPPCOROSERVICELIB_GRPC_OPENCENSUS_PROTO_VERSION}.tar.gz"
         SOURCE_DIR "${grpc_SOURCE_DIR}/third_party/opencensus-proto"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     # A prepared gRPC source cache already contains these dependencies.  The
@@ -265,7 +265,7 @@ if(CPPBOOSTSERVICELIB_ENABLE_GRPC)
       endif()
     endforeach()
     FetchContent_Declare(asio-grpc
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/Tradias/asio-grpc/archive/refs/tags/${CPPBOOSTSERVICELIB_ASIO_GRPC_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/Tradias/asio-grpc/archive/refs/tags/${CPPCOROSERVICELIB_ASIO_GRPC_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     add_subdirectory("${grpc_SOURCE_DIR}" "${grpc_BINARY_DIR}")
     FetchContent_MakeAvailable(asio-grpc)
@@ -275,9 +275,9 @@ if(CPPBOOSTSERVICELIB_ENABLE_GRPC)
   # the same libraries without a namespace. Normalize that provider detail for
   # the framework component and tests.
   if(TARGET gRPC::grpc++)
-    set(CPPBOOSTSERVICELIB_GRPCPP_TARGET gRPC::grpc++)
+    set(CPPCOROSERVICELIB_GRPCPP_TARGET gRPC::grpc++)
   elseif(TARGET grpc++)
-    set(CPPBOOSTSERVICELIB_GRPCPP_TARGET grpc++)
+    set(CPPCOROSERVICELIB_GRPCPP_TARGET grpc++)
     add_library(gRPC::grpc++ ALIAS grpc++)
   else()
     message(FATAL_ERROR "gRPC C++ target was not created")
@@ -300,23 +300,23 @@ if(CPPBOOSTSERVICELIB_ENABLE_GRPC)
   endif()
 endif()
 
-if(CPPBOOSTSERVICELIB_ENABLE_KAFKA)
-  if(CPPBOOSTSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
+if(CPPCOROSERVICELIB_ENABLE_KAFKA)
+  if(CPPCOROSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
     find_package(RdKafka CONFIG QUIET GLOBAL)
     if(NOT TARGET RdKafka::rdkafka)
-      find_path(CPPBOOSTSERVICELIB_RDKAFKA_INCLUDE_DIR
+      find_path(CPPCOROSERVICELIB_RDKAFKA_INCLUDE_DIR
           NAMES librdkafka/rdkafka.h rdkafka.h REQUIRED)
-      find_library(CPPBOOSTSERVICELIB_RDKAFKA_LIBRARY
+      find_library(CPPCOROSERVICELIB_RDKAFKA_LIBRARY
           NAMES rdkafka REQUIRED)
       add_library(RdKafka::rdkafka UNKNOWN IMPORTED)
       set_target_properties(RdKafka::rdkafka PROPERTIES
-          IMPORTED_LOCATION "${CPPBOOSTSERVICELIB_RDKAFKA_LIBRARY}"
+          IMPORTED_LOCATION "${CPPCOROSERVICELIB_RDKAFKA_LIBRARY}"
           INTERFACE_INCLUDE_DIRECTORIES
-              "${CPPBOOSTSERVICELIB_RDKAFKA_INCLUDE_DIR}")
+              "${CPPCOROSERVICELIB_RDKAFKA_INCLUDE_DIR}")
     endif()
-  elseif(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
-    _servicelib_require_local(librdkafka "${CPPBOOSTSERVICELIB_RDKAFKA_SOURCE_DIR}")
-    add_subdirectory("${CPPBOOSTSERVICELIB_RDKAFKA_SOURCE_DIR}"
+  elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
+    _servicelib_require_local(librdkafka "${CPPCOROSERVICELIB_RDKAFKA_SOURCE_DIR}")
+    add_subdirectory("${CPPCOROSERVICELIB_RDKAFKA_SOURCE_DIR}"
                      "${CMAKE_BINARY_DIR}/_deps/librdkafka" EXCLUDE_FROM_ALL)
     _servicelib_normalize_librdkafka_cmake_config(
         "${CMAKE_BINARY_DIR}/_deps/librdkafka/generated/config.h")
@@ -324,7 +324,7 @@ if(CPPBOOSTSERVICELIB_ENABLE_KAFKA)
     set(RDKAFKA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(RDKAFKA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(librdkafka
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/confluentinc/librdkafka/archive/refs/tags/${CPPBOOSTSERVICELIB_LIBRDKAFKA_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/confluentinc/librdkafka/archive/refs/tags/${CPPCOROSERVICELIB_LIBRDKAFKA_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_MakeAvailable(librdkafka)
     _servicelib_normalize_librdkafka_cmake_config(
@@ -332,22 +332,22 @@ if(CPPBOOSTSERVICELIB_ENABLE_KAFKA)
   endif()
 
   if(TARGET RdKafka::rdkafka)
-    set(CPPBOOSTSERVICELIB_RDKAFKA_TARGET RdKafka::rdkafka)
+    set(CPPCOROSERVICELIB_RDKAFKA_TARGET RdKafka::rdkafka)
   elseif(TARGET rdkafka)
-    set(CPPBOOSTSERVICELIB_RDKAFKA_TARGET rdkafka)
+    set(CPPCOROSERVICELIB_RDKAFKA_TARGET rdkafka)
   else()
     message(FATAL_ERROR "librdkafka C target was not created")
   endif()
 endif()
 
-if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
-  if(NOT CPPBOOSTSERVICELIB_ENABLE_GRPC)
+if(CPPCOROSERVICELIB_ENABLE_OTEL)
+  if(NOT CPPCOROSERVICELIB_ENABLE_GRPC)
     message(FATAL_ERROR
-        "CPPBOOSTSERVICELIB_ENABLE_OTEL requires CPPBOOSTSERVICELIB_ENABLE_GRPC for the OTLP gRPC exporter")
+        "CPPCOROSERVICELIB_ENABLE_OTEL requires CPPCOROSERVICELIB_ENABLE_GRPC for the OTLP gRPC exporter")
   endif()
-  if(CPPBOOSTSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
+  if(CPPCOROSERVICELIB_DEPENDENCY_MODE MATCHES "^(CONAN|SYSTEM)$")
     find_package(opentelemetry-cpp CONFIG REQUIRED GLOBAL)
-  elseif(CPPBOOSTSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
+  elseif(CPPCOROSERVICELIB_DEPENDENCY_MODE STREQUAL "LOCAL")
     set(_servicelib_saved_find_package_prefer_config
         "${CMAKE_FIND_PACKAGE_PREFER_CONFIG}")
     set(_servicelib_saved_build_testing "${BUILD_TESTING}")
@@ -355,8 +355,8 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
     set(BUILD_TESTING OFF)
     _servicelib_prepare_otel_package_bridge()
     set(OPENTELEMETRY_INSTALL OFF CACHE BOOL "" FORCE)
-    _servicelib_require_local(opentelemetry-cpp "${CPPBOOSTSERVICELIB_OPENTELEMETRY_SOURCE_DIR}")
-    add_subdirectory("${CPPBOOSTSERVICELIB_OPENTELEMETRY_SOURCE_DIR}"
+    _servicelib_require_local(opentelemetry-cpp "${CPPCOROSERVICELIB_OPENTELEMETRY_SOURCE_DIR}")
+    add_subdirectory("${CPPCOROSERVICELIB_OPENTELEMETRY_SOURCE_DIR}"
                      "${CMAKE_BINARY_DIR}/_deps/opentelemetry" EXCLUDE_FROM_ALL)
     set(CMAKE_FIND_PACKAGE_PREFER_CONFIG
         "${_servicelib_saved_find_package_prefer_config}")
@@ -374,7 +374,7 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
     # source dependencies belong to different export sets (gRPC/protobuf/
     # Abseil); exporting them from the framework build is invalid. Installed
     # framework consumers resolve an independently installed OTel package via
-    # cppboostservicelibConfig.cmake.
+    # cppcoroservicelibConfig.cmake.
     set(OPENTELEMETRY_INSTALL OFF CACHE BOOL "" FORCE)
     # The pinned gRPC/protobuf source targets were created by the framework's
     # transport dependency block above. OTel's nested CMake checks package
@@ -392,7 +392,7 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
       set(_servicelib_otel_proto_source
           "${CMAKE_BINARY_DIR}/_deps/opentelemetry-cpp-build/opentelemetry-proto-prefix/src/opentelemetry-proto")
       FetchContent_Declare(opentelemetry-proto-source
-          URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/open-telemetry/opentelemetry-proto/archive/refs/tags/${CPPBOOSTSERVICELIB_OPENTELEMETRY_PROTO_VERSION}.tar.gz"
+          URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/open-telemetry/opentelemetry-proto/archive/refs/tags/${CPPCOROSERVICELIB_OPENTELEMETRY_PROTO_VERSION}.tar.gz"
           SOURCE_DIR "${_servicelib_otel_proto_source}"
           DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
       FetchContent_GetProperties(opentelemetry-proto-source)
@@ -408,15 +408,15 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
     # vcpkg) that are not needed by the CMake OTLP build but make a clean
     # consumer configure clone them all before compilation can begin.
     set(_servicelib_otel_patch_command "")
-    if(CPPBOOSTSERVICELIB_HOST_PROTOC_EXECUTABLE OR
-       CPPBOOSTSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE)
-      if(NOT CPPBOOSTSERVICELIB_HOST_PROTOC_EXECUTABLE OR
-         NOT CPPBOOSTSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE)
+    if(CPPCOROSERVICELIB_HOST_PROTOC_EXECUTABLE OR
+       CPPCOROSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE)
+      if(NOT CPPCOROSERVICELIB_HOST_PROTOC_EXECUTABLE OR
+         NOT CPPCOROSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE)
         message(FATAL_ERROR
             "Both pinned OpenTelemetry host code generators must be provided")
       endif()
       set(gRPC_CPP_PLUGIN_EXECUTABLE
-          "${CPPBOOSTSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE}")
+          "${CPPCOROSERVICELIB_HOST_GRPC_CPP_PLUGIN_EXECUTABLE}")
       set(_servicelib_otel_patch_command
           PATCH_COMMAND
           ${CMAKE_COMMAND}
@@ -424,7 +424,7 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
           -P ${CMAKE_CURRENT_LIST_DIR}/PatchOpenTelemetryHostTools.cmake)
     endif()
     FetchContent_Declare(opentelemetry-cpp
-        URL "${CPPBOOSTSERVICELIB_GITHUB_ARCHIVE_BASE}/open-telemetry/opentelemetry-cpp/archive/refs/tags/${CPPBOOSTSERVICELIB_OPENTELEMETRY_VERSION}.tar.gz"
+        URL "${CPPCOROSERVICELIB_GITHUB_ARCHIVE_BASE}/open-telemetry/opentelemetry-cpp/archive/refs/tags/${CPPCOROSERVICELIB_OPENTELEMETRY_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP FALSE
         ${_servicelib_otel_patch_command})
     FetchContent_MakeAvailable(opentelemetry-cpp)
@@ -473,10 +473,10 @@ if(CPPBOOSTSERVICELIB_ENABLE_OTEL)
           opentelemetry-cpp::ostream_span_exporter)
     endif()
     if(TARGET ${_servicelib_otel_build_target})
-      set(CPPBOOSTSERVICELIB_OTEL_${_servicelib_otel_component}_TARGET
+      set(CPPCOROSERVICELIB_OTEL_${_servicelib_otel_component}_TARGET
           ${_servicelib_otel_build_target})
     elseif(TARGET ${_servicelib_otel_installed_target})
-      set(CPPBOOSTSERVICELIB_OTEL_${_servicelib_otel_component}_TARGET
+      set(CPPCOROSERVICELIB_OTEL_${_servicelib_otel_component}_TARGET
           ${_servicelib_otel_installed_target})
     else()
       message(FATAL_ERROR

@@ -16,8 +16,8 @@ required_conan_version = ">=2.8.0"
 LOCAL_RECIPE_NAMESPACE = "@gorundebug/boost"
 
 
-class CppBoostServiceLibConan(ConanFile):
-    name = "cppboostservicelib"
+class CppCoroServiceLibConan(ConanFile):
+    name = "cppcoroservicelib"
     package_type = "library"
     license = "Apache-2.0"
     url = "https://github.com/gorundebug/cppcoroservicelib"
@@ -32,6 +32,7 @@ class CppBoostServiceLibConan(ConanFile):
         "with_otel": [True, False],
         "with_cron": [True, False],
         "with_tests": [True, False],
+        "io_backend": ["epoll", "uring"],
     }
     default_options = {
         "shared": False,
@@ -41,6 +42,7 @@ class CppBoostServiceLibConan(ConanFile):
         "with_otel": False,
         "with_cron": True,
         "with_tests": False,
+        "io_backend": "epoll",
     }
     exports_sources = (
         "CMakeLists.txt",
@@ -53,12 +55,12 @@ class CppBoostServiceLibConan(ConanFile):
     def set_version(self):
         cmake = (Path(self.recipe_folder) / "CMakeLists.txt").read_text()
         match = re.search(
-            r"project\(cppboostservicelib VERSION ([0-9]+\.[0-9]+\.[0-9]+)",
+            r"project\(cppcoroservicelib VERSION ([0-9]+\.[0-9]+\.[0-9]+)",
             cmake,
         )
         if match is None:
             raise ConanInvalidConfiguration(
-                "cppboostservicelib version is missing from CMakeLists.txt"
+                "cppcoroservicelib version is missing from CMakeLists.txt"
             )
         self.version = match.group(1)
 
@@ -94,6 +96,8 @@ class CppBoostServiceLibConan(ConanFile):
     def requirements(self):
         self.requires(f"boost/{VERSIONS['boost']}", override=True)
         self.requires(f"yaml-cpp/{VERSIONS['yaml-cpp']}")
+        # Both HTTP and gRPC DNS use the same event-driven c-ares channel.
+        self.requires("c-ares/[>=1.19.1 <2]")
 
         if self.options.with_tests:
             self.requires(f"gtest/{VERSIONS['googletest']}{LOCAL_RECIPE_NAMESPACE}")
@@ -134,20 +138,21 @@ class CppBoostServiceLibConan(ConanFile):
         deps.generate()
 
         toolchain = CMakeToolchain(self)
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_DEPENDENCY_MODE"] = "CONAN"
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_BUILD_TESTS"] = bool(
+        toolchain.cache_variables["CPP_CORO_IO_BACKEND"] = str(self.options.io_backend)
+        toolchain.cache_variables["CPPCOROSERVICELIB_DEPENDENCY_MODE"] = "CONAN"
+        toolchain.cache_variables["CPPCOROSERVICELIB_BUILD_TESTS"] = bool(
             self.options.with_tests
         )
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_ENABLE_GRPC"] = bool(
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_GRPC"] = bool(
             self.options.with_grpc
         )
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_ENABLE_KAFKA"] = bool(
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_KAFKA"] = bool(
             self.options.with_kafka
         )
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_ENABLE_OTEL"] = bool(
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_OTEL"] = bool(
             self.options.with_otel
         )
-        toolchain.cache_variables["CPPBOOSTSERVICELIB_ENABLE_CRON"] = bool(
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_CRON"] = bool(
             self.options.with_cron
         )
         toolchain.generate()
@@ -169,4 +174,4 @@ class CppBoostServiceLibConan(ConanFile):
         # target surface (cron, gRPC, Kafka and OTEL).  Do not let CMakeDeps
         # shadow it with a synthetic config containing only the root target.
         self.cpp_info.set_property("cmake_find_mode", "none")
-        self.cpp_info.builddirs.append("lib/cmake/cppboostservicelib")
+        self.cpp_info.builddirs.append("lib/cmake/cppcoroservicelib")

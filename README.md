@@ -8,7 +8,7 @@ The existing C++/Boost runtime remains a separate implementation.
 The canonical project is https://github.com/gorundebug/cppcoroexample.
 Its build pins this runtime, not the C++/Boost runtime. Set
 `SERVICELIB_SOURCE_CONTEXT` to a local checkout when developing the library.
-CMake package and option names retain the existing `cppboostservicelib` spelling
+CMake package and option names retain the existing `cppcoroservicelib` spelling
 for build-tool compatibility; this does not select the Boost runtime.
 There is not yet a separate coroutine target in the shared generator.
 Current verification evidence and outstanding work are recorded in
@@ -90,7 +90,7 @@ For a host without preinstalled Boost or yaml-cpp, use pinned source archives:
 
 ```bash
 cmake -S . -B build/fetch -G Ninja \
-  -DCPPBOOSTSERVICELIB_DEPENDENCY_MODE=FETCH
+  -DCPPCOROSERVICELIB_DEPENDENCY_MODE=FETCH
 cmake --build build/fetch --parallel
 ```
 
@@ -143,3 +143,28 @@ collector is drained on cancellation and must cooperate. Business failures remai
 result values or graph error paths; runtime failures use exception conventions.
 Shared Join state, keys and pools keep their existing behavior. Temporal is not
 supported by C++/Boost.
+
+## Shared coroutine HTTP/gRPC runtime (Linux)
+
+`servicelib::async::CoroRuntime` in `runtime/detail/coro_runtime.hpp` is the
+shared event-driven runtime used by `cppcoroexample`. HTTP and gRPC Callback API
+use the same Asio `io_context`, backed by epoll. Timers use Asio/timerfd; HTTP and
+gRPC DNS resolution uses c-ares on the same loop. No CompletionQueue worker pool
+or periodic transport polling is used by this runtime. The Linux backend needs
+neither liburing nor an io_uring-specific Docker seccomp profile.
+
+`Options::workers` is the total shared HTTP/gRPC worker count, not a count per
+transport. The gRPC internal timer thread remains. Optional blocking workers
+are a separate explicit boundary for Kafka; they are not HTTP/gRPC pollers.
+
+Construct and start the runtime before channels, servers or OTLP providers.
+Drain services, destroy gRPC objects and shut down telemetry before stopping
+and joining the runtime. Only one instance owns the process-wide default gRPC
+EventEngine. Existing CQ adapter headers remain for compatibility; the canonical
+coro application uses the callback adapters instead.
+
+Link `servicelib::grpc` for gRPC adapters, or
+`servicelib::coro_event_engine` when explicitly hosting the shared runtime.
+The package includes compiled DNS/EventEngine support in addition to its
+operator headers. The experimental epoll implementation is now part of coro,
+not a separately supported library or benchmark variant.

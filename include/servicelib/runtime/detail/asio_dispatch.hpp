@@ -1,12 +1,13 @@
 #pragma once
 
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/post.hpp>
 
 #include <exception>
-#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -36,8 +37,9 @@ class ParallelExecutorRegistry final {
     return executor_;
   }
 
-  static void Post(std::function<boost::asio::awaitable<void>()> task) {
-    boost::asio::co_spawn(Get(), std::move(task),
+  template<class Task>
+  static void Post(Task task) {
+    boost::asio::co_spawn(servicelib::async::WorkerIoContext::NextExecutor(Get()), std::move(task),
         [](std::exception_ptr error) { if (error) std::rethrow_exception(error); });
   }
 
@@ -71,7 +73,8 @@ class BlockingExecutorRegistry final {
     return executor_;
   }
 
-  static void Post(std::function<void()> task) {
+  template<class Task>
+  static void Post(Task task) {
     boost::asio::post(Get(), std::move(task));
   }
 

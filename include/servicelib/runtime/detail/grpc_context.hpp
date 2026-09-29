@@ -42,7 +42,7 @@ inline void InjectContext(const MessageContext& context,
   }
 }
 
-inline MessageContext ExtractContext(const grpc::ServerContext& server,
+inline MessageContext ExtractContext(const grpc::ServerContextBase& server,
                                      bool tracingEnabled = true) {
   http::Headers headers;
   for (const auto& [key, value] : server.client_metadata()) {

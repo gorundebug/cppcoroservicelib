@@ -339,6 +339,87 @@ class TestEnvironment final : public servicelib::IRuntimeEnvironment {
   servicelib::testtracing::TestTracing* tracing_{};
 };
 
+class ConfiguredMethodSourceEndpoint final
+    : public servicelib::datasource::http::IBeastEndpoint {
+ public:
+  explicit ConfiguredMethodSourceEndpoint(
+      servicelib::config::HttpEndpointConfig config)
+      : config_(std::move(config)) {}
+  int id() const noexcept override { return config_.id; }
+  void start(servicelib::Context) override {}
+  boost::asio::awaitable<void> stop(servicelib::Context) override { co_return; }
+  servicelib::config::HttpEndpointConfig endpointConfig() const override {
+    return config_;
+  }
+  boost::asio::awaitable<servicelib::http::Response> handle(
+      servicelib::http::Request request,
+      servicelib::MessageContext context) override {
+    ++calls;
+    co_return servicelib::http::Response{
+        200, {}, request.method + ":" + std::string{context.streamId()},
+        "text/plain", false};
+  }
+  int calls{};
+ private:
+  servicelib::config::HttpEndpointConfig config_;
+};
+
+TEST(HttpDataSource, RegistersEveryDeclaredMethodWithoutPostFallback) {
+  using Method = servicelib::api::HTTPMethodType;
+  const std::pair<Method, const char*> methods[] = {
+      {Method::kGET, "GET"}, {Method::kPOST, "POST"},
+      {Method::kPUT, "PUT"}, {Method::kPATCH, "PATCH"},
+      {Method::kDELETE, "DELETE"}, {Method::kHEAD, "HEAD"},
+      {Method::kOPTIONS, "OPTIONS"}, {Method::kTRACE, "TRACE"},
+      {Method::kCONNECT, "CONNECT"}};
+  struct Input {
+    int getEndpointId() const { return 1; }
+  };
+  boost::asio::io_context io;
+  for (const auto& [method, name] : methods) {
+    SCOPED_TRACE(name);
+    TestEnvironment environment{nullptr, method};
+    auto source = servicelib::datasource::http::BeastDataSource::make(
+        environment, Input{});
+    auto endpoint = std::make_shared<ConfiguredMethodSourceEndpoint>(
+        TestConfig{method}.endpoint);
+    source->addEndpoint(endpoint);
+    servicelib::http::Router router;
+    source->registerRoutes(router);
+    router.Freeze();
+    for (const auto& [candidate, candidateName] : methods) {
+      servicelib::http::Request request;
+      request.method = candidateName;
+      request.path = "/orders";
+      io.restart();
+      auto response = boost::asio::co_spawn(
+          io, router.Dispatch(std::move(request),
+              servicelib::MessageContext{}.withStreamId("method-parent")),
+          boost::asio::use_future);
+      io.run();
+      const auto result = response.get();
+      EXPECT_EQ(result.status, candidate == method ? 200 : 405);
+      if (candidate == method) {
+        EXPECT_EQ(result.body, std::string{name} + ":method-parent");
+      }
+    }
+    EXPECT_EQ(endpoint->calls, 1);
+  }
+  for (const auto method : {Method::kUndefined, static_cast<Method>(-1),
+                            static_cast<Method>(99)}) {
+    SCOPED_TRACE(static_cast<int>(method));
+    TestEnvironment environment{nullptr, method};
+    auto source = servicelib::datasource::http::BeastDataSource::make(
+        environment, Input{});
+    auto endpoint = std::make_shared<ConfiguredMethodSourceEndpoint>(
+        TestConfig{method}.endpoint);
+    source->addEndpoint(endpoint);
+    servicelib::http::Router router;
+    EXPECT_THROW(source->registerRoutes(router), std::invalid_argument);
+    EXPECT_EQ(endpoint->calls, 0);
+  }
+}
+
 struct Handler final {
   using State = int;
   using Request = std::string;
@@ -376,6 +457,83 @@ struct Handler final {
     co_return;
   }
 };
+
+TEST(HttpDataSource, ConcreteEndpointSupportsEveryDeclaredMethodAndCorrelation) {
+  using Method = servicelib::api::HTTPMethodType;
+  using Endpoint = servicelib::datasource::http::BeastEndpoint<
+      std::string, std::string, Handler>;
+  const std::pair<Method, const char*> methods[] = {
+      {Method::kGET, "GET"}, {Method::kPOST, "POST"},
+      {Method::kPUT, "PUT"}, {Method::kPATCH, "PATCH"},
+      {Method::kDELETE, "DELETE"}, {Method::kHEAD, "HEAD"},
+      {Method::kOPTIONS, "OPTIONS"}, {Method::kTRACE, "TRACE"},
+      {Method::kCONNECT, "CONNECT"}};
+  struct Input {
+    int getEndpointId() const { return 1; }
+  };
+  boost::asio::io_context io;
+  servicelib::detail::ParallelExecutorRegistry::Set(io.get_executor());
+  struct ClearRegistry {
+    ~ClearRegistry() { servicelib::detail::ParallelExecutorRegistry::Clear(); }
+  } clearRegistry;
+  for (const auto& [method, name] : methods) {
+    SCOPED_TRACE(name);
+    TestEnvironment environment{nullptr, method};
+    Endpoint* observer{};
+    int delivered = 0;
+    auto endpoint = std::make_shared<Endpoint>(
+        environment, 1, 33, Handler{},
+        [&](servicelib::MessageContext context,
+            servicelib::Payload<std::string> value) -> boost::asio::awaitable<void> {
+          EXPECT_EQ(context.streamId(), "method-parent");
+          EXPECT_EQ(value.get(), "request");
+          ++delivered;
+          co_await observer->consumeResult(std::move(context), std::move(value));
+        },
+        true);
+    observer = endpoint.get();
+    auto source = servicelib::datasource::http::BeastDataSource::make(
+        environment, Input{});
+    source->addEndpoint(endpoint);
+    servicelib::http::Router router;
+    source->registerRoutes(router);
+    router.Freeze();
+    runHttp(io, source->start({}));
+    for (const auto& [candidate, candidateName] : methods) {
+      SCOPED_TRACE(candidateName);
+      auto dispatch = [&]() -> boost::asio::awaitable<void> {
+        servicelib::http::Request request;
+        request.method = candidateName;
+        request.target = "/orders";
+        request.path = "/orders";
+        request.body = "request";
+        auto response = co_await router.Dispatch(
+            std::move(request),
+            servicelib::MessageContext{}.withStreamId("method-parent"));
+        EXPECT_EQ(response.status, candidate == method ? 200 : 405);
+      if (candidate == method) {
+        EXPECT_EQ(response.body, "reply:request");
+      }
+      };
+      runHttp(io, dispatch());
+    }
+    EXPECT_EQ(delivered, 1);
+    runHttp(io, source->stop({}));
+  }
+  for (const auto method : {Method::kUndefined, static_cast<Method>(-1),
+                            static_cast<Method>(99)}) {
+    SCOPED_TRACE(static_cast<int>(method));
+    TestEnvironment environment{nullptr, method};
+    Endpoint::Output output = [](
+        servicelib::MessageContext,
+        servicelib::Payload<std::string>) -> boost::asio::awaitable<void> {
+      ADD_FAILURE() << "invalid method must fail before business execution";
+      co_return;
+    };
+    EXPECT_THROW((Endpoint{environment, 1, Handler{}, std::move(output), false}),
+                 std::invalid_argument);
+  }
+}
 
 TEST(HttpDataSource, PreservesCanonicalHandlerAndCorrelationContract) {
   boost::asio::io_context io;
@@ -578,7 +736,13 @@ TEST(HttpDataSource, TracingDoesNotDelayCancellationOrDeadline) {
       if (useDeadline) std::this_thread::sleep_until(deadline);
       else stop.request_stop();
       io.restart();
-      io.poll();
+      // An expired deadline does not imply its kernel completion is ready for
+      // poll(). Wait for this response, retaining the graph token throughout.
+      const auto completionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+      while (response.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready) {
+        if (io.run_one_until(completionDeadline) == 0) break;
+        if (std::chrono::steady_clock::now() >= completionDeadline) break;
+      }
       EXPECT_EQ(response.wait_for(std::chrono::milliseconds{0}), std::future_status::ready);
       EXPECT_EQ(endCalls, 1);
       retained.reset();

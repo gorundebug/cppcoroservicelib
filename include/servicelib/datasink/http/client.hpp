@@ -16,6 +16,8 @@
 
 #include <servicelib/runtime/detail/http_types.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/coro_resolver.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -62,6 +64,7 @@ class ClientError final : public std::runtime_error {
 };
 
 class Client final {
+  struct Connection;
  public:
   struct Options final {
     std::size_t connections{4};
@@ -75,7 +78,7 @@ class Client final {
       : Client(std::move(executor), Options{}) {}
   Client(boost::asio::any_io_executor executor, Options options)
       : executor_(std::move(executor)), options_(Validate(std::move(options))),
-        state_(std::make_shared<PoolState>(executor_, options_)) {}
+        state_(servicelib::detail::MakeStrandOwned<PoolState>(executor_, options_)) {}
   Client(const Client&) = delete;
   Client& operator=(const Client&) = delete;
   ~Client() { BeginStop(state_); }
@@ -90,17 +93,48 @@ class Client final {
         state_->strand, Acquire(state_, host, port, context, deadline),
         boost::asio::use_awaitable);
 
-    co_await boost::asio::dispatch(connection->stream.get_executor(),
-                                   boost::asio::use_awaitable);
+    const auto executor = connection->stream.get_executor();
+    co_return co_await boost::asio::co_spawn(
+        executor, SendOnConnection(std::move(connection), std::move(host),
+                                   std::move(port), std::move(request),
+                                   std::move(context), deadline),
+        boost::asio::use_awaitable);
+  }
+
+ private:
+  // A one-off dispatch does not change an awaitable's associated executor.
+  // Keep every socket operation and its continuations on the connection owner.
+  boost::asio::awaitable<Response> SendOnConnection(
+      std::shared_ptr<Connection> connection, std::string host, std::string port,
+      Request request, MessageContext context,
+      std::chrono::steady_clock::time_point deadline) {
+    // A cancellation/deadline check can throw after the request was written
+    // but before async_read starts. Do not return that connection to the pool
+    // with an unread response, even when no socket operation reports an error.
+    struct Exchange final {
+      Connection& connection;
+      bool complete{};
+      ~Exchange() {
+        if (!complete) Client::Close(connection);
+      }
+    } exchange{*connection};
     ConnectionCancellation cancellation{*this, connection, context};
     ThrowIfCancelled(context, deadline, "HTTP request admission");
 
     if (!connection->stream.socket().is_open() || connection->host != host ||
         connection->port != port) {
       Close(*connection);
-      auto resolver = std::make_shared<boost::asio::ip::tcp::resolver>(
+      auto resolver = std::make_shared<servicelib::async::CoroResolver>(
           connection->stream.get_executor());
+      connection->resolver.store(resolver);
+      struct ClearResolver {
+        std::shared_ptr<Connection> connection;
+        ~ClearResolver() {
+          if (auto pending = connection->resolver.exchange(nullptr)) pending->cancel();
+        }
+      } clear_resolver{connection};
       ResolveCancellation resolveCancellation{resolver, context};
+      if (state_->stopped()) resolver->cancel();
       auto resolveTimer = std::make_shared<boost::asio::steady_timer>(
           connection->stream.get_executor(), deadline);
       resolveTimer->async_wait(
@@ -108,9 +142,7 @@ class Client final {
             if (!timerError) resolver->cancel();
           });
       boost::system::error_code error;
-      const auto endpoints = co_await resolver->async_resolve(
-          host, port,
-          boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      const auto endpoints = co_await resolver->Resolve(host, port, error);
       static_cast<void>(resolveTimer->cancel());
       if (error) {
         Close(*connection);
@@ -137,7 +169,7 @@ class Client final {
                                                           : request.target,
         11};
     message.set(boost::beast::http::field::host, host);
-    message.set(boost::beast::http::field::user_agent, "cppboostservicelib");
+    message.set(boost::beast::http::field::user_agent, "cppcoroservicelib");
     for (const auto& [name, value] : request.headers) message.set(name, value);
     message.keep_alive(request.keepAlive);
     message.body() = std::move(request.body);
@@ -180,9 +212,11 @@ class Client final {
         contentType != response.headers.end())
       response.contentType = contentType->second;
     if (!received.keep_alive()) Close(*connection);
+    exchange.complete = true;
     co_return response;
   }
 
+ public:
   // Await shutdown before releasing the host and its executor.
   [[nodiscard]] boost::asio::awaitable<void> Stop() {
     auto state = state_;
@@ -226,13 +260,15 @@ class Client final {
 
   struct Connection final {
     explicit Connection(boost::asio::any_io_executor executor)
-        : stream(boost::asio::make_strand(std::move(executor))) {}
+        : strand(boost::asio::make_strand(std::move(executor))), stream(strand) {}
+    boost::asio::strand<boost::asio::any_io_executor> strand;
     boost::beast::tcp_stream stream;
     boost::beast::flat_buffer buffer;
     std::string host;
     std::string port;
     bool busy{};
     std::atomic<std::uint64_t> cancellationGeneration{};
+    std::atomic<std::shared_ptr<servicelib::async::CoroResolver>> resolver;
   };
 
   using ConnectionSignal = boost::asio::experimental::concurrent_channel<
@@ -293,14 +329,6 @@ class Client final {
       state->operations |= kClosed;
     }
     if (before & kClosed) return;
-    if (before == 0 && !state->finishing.exchange(true)) {
-      // No operation can still access sockets, including when an external
-      // caller has already stopped its io_context.
-      for (const auto& connection : state->connections) Close(*connection);
-      state->done.store(true, std::memory_order_release);
-      state->drained.Send();
-      return;
-    }
     boost::asio::post(state->strand, [state] {
       for (const auto& waiter : state->waiters)
         static_cast<void>(waiter->signal.try_send(boost::system::error_code{},
@@ -315,7 +343,7 @@ class Client final {
   class ResolveCancellation final {
    public:
     ResolveCancellation(
-        std::shared_ptr<boost::asio::ip::tcp::resolver> resolver,
+        std::shared_ptr<servicelib::async::CoroResolver> resolver,
         const MessageContext& context) {
       const auto cancel = [resolver] {
         boost::asio::dispatch(resolver->get_executor(),
@@ -412,7 +440,8 @@ class Client final {
           if (!connection->busy) { available = connection; break; }
       }
       if (!available && state->connections.size() < state->options.connections) {
-        available = std::make_shared<Connection>(state->strand.get_inner_executor());
+        available = servicelib::detail::MakeStrandOwned<Connection>(
+            state->strand.get_inner_executor());
         state->connections.push_back(available);
         state->connectionCount.store(state->connections.size());
       }
@@ -514,6 +543,7 @@ class Client final {
   }
 
   static void Close(Connection& connection) noexcept {
+    if (auto resolver = connection.resolver.exchange(nullptr)) resolver->cancel();
     boost::system::error_code ignored;
     connection.stream.socket().cancel(ignored);
     connection.stream.socket().shutdown(
@@ -534,6 +564,7 @@ class Client final {
                   std::memory_order_acquire) != generation) {
             return;
           }
+          if (auto resolver = connection->resolver.load()) resolver->cancel();
           boost::system::error_code ignored;
           connection->stream.socket().cancel(ignored);
         });

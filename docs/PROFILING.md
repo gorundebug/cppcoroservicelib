@@ -81,10 +81,10 @@ It applies the same CPU quotas and workload to framework and native services
 and produces the existing folded-stack/flamegraph artifacts; do not profile an
 unconstrained ad-hoc run when comparing implementations.
 
-The runner also captures timestamped Boost runtime metrics while the workload
+The runner also captures timestamped Coro runtime metrics while the workload
 is active. Correlate `runtime_active_work`, `runtime_worker_utilization` and
 `runtime_event_loop_lag_seconds` in
-`cppboost.<service>.runtime-metrics.json` with the load-generator result and
+`cppcoro.<service>.runtime-metrics.json` with the load-generator result and
 folded stacks. Profiling must fail if this artifact cannot be collected; a
 post-run `/metrics` scrape is not equivalent because active work has already
 drained by then.
@@ -110,7 +110,7 @@ For both generated services under the repository profiling workload, use:
 
 ```bash
 python3 profiling/examples/run.py \
-  --language cppboost \
+  --language cppcoro \
   --profile-kind cpu \
   --coroutine-diagnostics
 ```

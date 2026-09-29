@@ -131,13 +131,13 @@ class SourceEndpoint final
             std::chrono::steady_clock::now());
       });
     };
-    using StopCallback = std::stop_callback<std::function<void()>>;
+    using StopCallback = std::stop_callback<decltype(cancel)>;
     auto stopCallback = std::make_unique<StopCallback>(
-        context.stopToken(), std::function<void()>(cancel));
+        context.stopToken(), cancel);
     std::vector<std::unique_ptr<StopCallback>> externalCallbacks;
     for (const auto& token : context.externalStopTokens())
       externalCallbacks.push_back(std::make_unique<StopCallback>(
-          token, std::function<void()>(cancel)));
+          token, cancel));
 
     boost::system::error_code error;
     co_await pending->timer.async_wait(

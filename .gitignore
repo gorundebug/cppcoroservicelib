@@ -1,4 +1,5 @@
 /build/
+/.artifacts/
 CMakeUserPresets.json
 __pycache__/
 *.py[cod]

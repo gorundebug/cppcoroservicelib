@@ -20,7 +20,9 @@
 #include <type_traits>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <unordered_map>
 #include <utility>
@@ -55,7 +57,13 @@ class ShutdownTask final {
         [state = state_, callback = std::optional<Function>{std::move(function)}]() mutable
             -> boost::asio::awaitable<void> {
           std::exception_ptr error;
-          try { co_await std::invoke(*callback); }
+          try {
+            // co_spawn may dispatch inline on its executor. The constructor
+            // must return before user shutdown code can block, so the caller
+            // can independently await this task with a deadline.
+            co_await boost::asio::post(boost::asio::use_awaitable);
+            co_await std::invoke(*callback);
+          }
           catch (...) { error = std::current_exception(); }
           callback.reset();
           {

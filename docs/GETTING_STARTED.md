@@ -1,6 +1,6 @@
 # Build, run and diagnose
 
-This is the command-oriented entry point for `cppboostservicelib`, its
+This is the command-oriented entry point for `cppcoroservicelib`, its
 generated example and the repository-level verification tools. All CMake
 builds below use unrestricted `--parallel`.
 
@@ -15,7 +15,7 @@ system gRPC.
 
 ## Framework
 
-From `cppboostservicelib`:
+From `cppcoroservicelib`:
 
 ```bash
 # Fast framework/unit matrix in its canonical Docker environment.
@@ -52,7 +52,7 @@ The compatibility FETCH provider remains available during the Conan migration:
 ```bash
 cmake -S . -B build/fetch -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCPPBOOSTSERVICELIB_DEPENDENCY_MODE=FETCH
+  -DCPPCOROSERVICELIB_DEPENDENCY_MODE=FETCH
 cmake --build build/fetch --parallel
 ctest --test-dir build/fetch --output-on-failure
 ```
@@ -77,7 +77,7 @@ Set the maximum compiler-cache size when invoking a generated example:
 CCACHE_MAXSIZE=40G make cpp-build
 ```
 
-Inspect its statistics from `cppboostexample`:
+Inspect its statistics from `cppcoroexample`:
 
 ```bash
 docker compose -f docker-compose.cmake.generated.yml run --build --rm \
@@ -93,10 +93,10 @@ is managed separately by the selected Docker builder.
 ## Generated example
 
 Use an absolute framework checkout as the Docker build context. From
-`cppboostexample`:
+`cppcoroexample`:
 
 ```bash
-export SERVICELIB_SOURCE_CONTEXT=/absolute/path/to/cppboostservicelib
+export SERVICELIB_SOURCE_CONTEXT=/absolute/path/to/cppcoroservicelib
 
 # Repository-only Release build, tests and live two-service scenario.
 ./scripts/quickstart.generated.sh
@@ -115,7 +115,7 @@ export SERVICELIB_SOURCE_CONTEXT=/absolute/path/to/cppboostservicelib
 Start the example for manual requests:
 
 ```bash
-SERVICELIB_SOURCE_CONTEXT=/absolute/path/to/cppboostservicelib \
+SERVICELIB_SOURCE_CONTEXT=/absolute/path/to/cppcoroservicelib \
   docker compose up --build
 ```
 
@@ -165,8 +165,8 @@ and Rust:
 
 ## Generate and merge without replacing business logic
 
-The release gate generates the complete canonical Boost archive, merges it
-into a disposable copy of `cppboostexample`, proves every user-owned file and
+The release gate generates the complete canonical Coro archive, merges it
+into a disposable copy of `cppcoroexample`, proves every user-owned file and
 mode byte-identical, and then performs clean Docker unit and integration
 builds:
 
@@ -224,7 +224,7 @@ Find the saturation point by increasing closed virtual users:
 ```bash
 make -C /absolute/path/to/conformance/benchmarks/examples capacity \
   BENCHMARK_DEPENDENCIES_DIR=/absolute/path/to/stream_app_go \
-  CAPACITY_LANGUAGES="cpp-boost cpp-boost-native" \
+  CAPACITY_LANGUAGES="cpp-coro cpp-boost-native" \
   CORES=2 LOADGEN_CORES=6 \
   START_VUS=32 VUS_STEP=32 MAX_VUS=1024 \
   CAPACITY_DURATION=20s CAPACITY_ATTEMPTS=3 \
@@ -241,7 +241,7 @@ From the `profiling` repository:
 
 ```bash
 python3 examples/run.py \
-  --language cppboost --language cppboost-native \
+  --language cppcoro --language cppboost-native \
   --cores 2 --loadgen-cores 6 --vus 256 \
   --warmup 5s --duration 20s \
   --profile-kind cpu --profile-kind allocation \

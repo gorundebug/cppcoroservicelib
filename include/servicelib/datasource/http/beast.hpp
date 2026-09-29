@@ -25,6 +25,8 @@
 #include <servicelib/runtime/config/endpoint_types.hpp>
 #include <servicelib/runtime/datasource.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/store/rotatingmap.hpp>
 
@@ -44,6 +46,9 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cerrno>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace servicelib::http {
 
@@ -66,7 +71,7 @@ class Server final {
       : executor_(std::move(executor)),
         router_(std::move(router)),
         options_(Validate(std::move(options))),
-        acceptor_(std::make_shared<boost::asio::ip::tcp::acceptor>(executor_)),
+        listener_(servicelib::detail::MakeStrandOwned<Listener>(executor_)),
         running_(std::make_shared<std::atomic<bool>>()),
         acceptedConnections_(
             std::make_shared<std::atomic<std::uint64_t>>()) {
@@ -88,21 +93,56 @@ class Server final {
       router_->Freeze();
       const auto endpoint = boost::asio::ip::tcp::endpoint(
           boost::asio::ip::make_address(options_.address), options_.port);
-      acceptor_->open(endpoint.protocol());
-      acceptor_->set_option(boost::asio::socket_base::reuse_address(true));
-      acceptor_->bind(endpoint);
-      acceptor_->listen(boost::asio::socket_base::max_listen_connections);
-      boundPort_.store(acceptor_->local_endpoint().port(),
-                       std::memory_order_release);
-      boost::asio::co_spawn(
-          executor_,
-          AcceptLoop(acceptor_, running_, acceptedConnections_, router_,
-                     options_, sessionRegistry_),
-          boost::asio::detached);
+      auto descriptor = Bind(endpoint);
+      boost::asio::ip::tcp::endpoint local;
+      auto length = static_cast<socklen_t>(local.capacity());
+      if (::getsockname(descriptor.value, local.data(), &length) != 0)
+        ThrowSocketError("HTTP getsockname");
+      local.resize(length);
+      boundPort_.store(local.port(), std::memory_order_release);
+      {
+        std::lock_guard lock(sessionRegistry_->mutex);
+        if (sessionRegistry_->listenerActive || sessionRegistry_->pendingAccepts != 0 ||
+            !sessionRegistry_->sessions.empty())
+          throw std::logic_error("HTTP server has not retired");
+        sessionRegistry_->drained.reset();
+        sessionRegistry_->listenerActive = true;
+      }
+      try {
+        boost::asio::post(listener_->strand,
+            [listener = listener_, running = running_, accepted = acceptedConnections_,
+             router = router_, options = options_, registry = sessionRegistry_,
+             executor = executor_, protocol = endpoint.protocol(),
+             descriptor = std::move(descriptor)]() mutable {
+          try {
+            if (!running->load(std::memory_order_acquire)) {
+              RetireListener(registry);
+              return;
+            }
+            listener->acceptor.emplace(listener->strand);
+            listener->acceptor->assign(protocol, descriptor.value);
+            descriptor.Release();
+            boost::asio::co_spawn(listener->strand,
+                AcceptLoop(listener, running, accepted, router, options, registry, executor),
+                [listener, running, registry](std::exception_ptr error) {
+              listener->acceptor.reset();
+              running->store(false, std::memory_order_release);
+              RetireListener(registry);
+              if (error) std::rethrow_exception(error);
+            });
+          } catch (...) {
+            listener->acceptor.reset();
+            running->store(false, std::memory_order_release);
+            RetireListener(registry);
+            throw;
+          }
+        });
+      } catch (...) {
+        RetireListener(sessionRegistry_);
+        throw;
+      }
     } catch (...) {
       running_->store(false, std::memory_order_release);
-      boost::system::error_code ignored;
-      acceptor_->close(ignored);
       throw;
     }
   }
@@ -138,6 +178,73 @@ class Server final {
     std::mutex mutex;
     std::shared_ptr<servicelib::detail::SingleUseEvent> drained;
     std::unordered_map<const void*, std::shared_ptr<void>> sessions;
+    std::size_t pendingAccepts{};
+    bool listenerActive{};
+  };
+
+  struct Listener final {
+    explicit Listener(boost::asio::any_io_executor executor)
+        : strand(boost::asio::make_strand(std::move(executor))) {}
+    boost::asio::strand<boost::asio::any_io_executor> strand;
+    std::optional<boost::asio::ip::tcp::acceptor> acceptor;
+  };
+
+  struct NativeSocket final {
+    explicit NativeSocket(int descriptor) : value(descriptor) {}
+    NativeSocket(NativeSocket&& other) noexcept : value(std::exchange(other.value, -1)) {}
+    NativeSocket(const NativeSocket&) = delete;
+    ~NativeSocket() { if (value >= 0) ::close(value); }
+    void Release() noexcept { value = -1; }
+    int value;
+  };
+
+  [[noreturn]] static void ThrowSocketError(const char* operation) {
+    throw boost::system::system_error(errno, boost::system::system_category(), operation);
+  }
+
+  static NativeSocket Bind(const boost::asio::ip::tcp::endpoint& endpoint) {
+    NativeSocket descriptor(::socket(endpoint.protocol().family(),
+        SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, IPPROTO_TCP));
+    if (descriptor.value < 0) ThrowSocketError("HTTP socket");
+    const int reuse = 1;
+    if (::setsockopt(descriptor.value, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0)
+      ThrowSocketError("HTTP reuse_address");
+    if (::bind(descriptor.value, endpoint.data(), static_cast<socklen_t>(endpoint.size())) != 0)
+      ThrowSocketError("HTTP bind");
+    if (::listen(descriptor.value, boost::asio::socket_base::max_listen_connections) != 0)
+      ThrowSocketError("HTTP listen");
+    return descriptor;
+  }
+
+  static bool IsDrained(const SessionRegistry& registry) {
+    return !registry.listenerActive && registry.pendingAccepts == 0 && registry.sessions.empty();
+  }
+
+  static void RetireListener(const std::shared_ptr<SessionRegistry>& registry) {
+    std::shared_ptr<servicelib::detail::SingleUseEvent> drained;
+    {
+      std::lock_guard lock(registry->mutex);
+      registry->listenerActive = false;
+      if (IsDrained(*registry)) drained = registry->drained;
+    }
+    if (drained) drained->Send();
+  }
+
+  struct PendingAccept final {
+    explicit PendingAccept(std::shared_ptr<SessionRegistry> value) : registry(std::move(value)) {
+      std::lock_guard lock(registry->mutex);
+      ++registry->pendingAccepts;
+    }
+    ~PendingAccept() {
+      std::shared_ptr<servicelib::detail::SingleUseEvent> drained;
+      {
+        std::lock_guard lock(registry->mutex);
+        --registry->pendingAccepts;
+        if (IsDrained(*registry)) drained = registry->drained;
+      }
+      if (drained) drained->Send();
+    }
+    std::shared_ptr<SessionRegistry> registry;
   };
 
 class Session;
@@ -153,9 +260,12 @@ class Session;
 
   void BeginShutdown() noexcept {
     if (!running_->exchange(false, std::memory_order_acq_rel)) return;
-    boost::system::error_code ignored;
-    acceptor_->cancel(ignored);
-    acceptor_->close(ignored);
+    boost::asio::dispatch(listener_->strand, [listener = listener_] {
+      if (!listener->acceptor) return;
+      boost::system::error_code ignored;
+      listener->acceptor->cancel(ignored);
+      listener->acceptor->close(ignored);
+    });
     for (const auto& session : SnapshotSessions()) session->BeginShutdown();
   }
 
@@ -167,7 +277,7 @@ class Session;
       if (!sessionRegistry_->drained)
         sessionRegistry_->drained = std::make_shared<servicelib::detail::SingleUseEvent>();
       drained = sessionRegistry_->drained;
-      empty = sessionRegistry_->sessions.empty();
+      empty = IsDrained(*sessionRegistry_);
     }
     if (empty) drained->Send();
     return drained;
@@ -176,9 +286,11 @@ class Session;
   class Session final : public std::enable_shared_from_this<Session> {
    public:
     Session(boost::asio::ip::tcp::socket socket,
+            boost::asio::strand<boost::asio::any_io_executor> socketStrand,
             boost::asio::any_io_executor workerExecutor,
             std::shared_ptr<Router> router, const Options& options)
-        : stream_(std::move(socket)),
+        : strand(std::move(socketStrand)),
+          stream_(std::move(socket)),
           workerExecutor_(std::move(workerExecutor)),
           router_(std::move(router)),
           options_(options) {
@@ -195,11 +307,14 @@ class Session;
           stream_.get_executor(), Run(),
           [self = shared_from_this(), registry = std::move(registry)](
               std::exception_ptr) {
+            // Retire the connection-wide observer even when Run throws.
+            // Otherwise its pending wait would keep the Session alive.
+            self->StopOnExecutor();
             std::shared_ptr<servicelib::detail::SingleUseEvent> drained;
             {
               std::lock_guard lock(registry->mutex);
               registry->sessions.erase(self.get());
-              if (registry->sessions.empty()) drained = registry->drained;
+              if (IsDrained(*registry)) drained = registry->drained;
             }
             if (drained) drained->Send();
           });
@@ -220,6 +335,8 @@ class Session;
       });
     }
 
+    boost::asio::strand<boost::asio::any_io_executor> strand;
+
    private:
     void StopOnExecutor() noexcept {
       boost::system::error_code ignored;
@@ -231,8 +348,6 @@ class Session;
 
     struct RequestCancellation final {
       std::stop_source source;
-      boost::asio::cancellation_signal observer;
-      std::atomic<bool> disarmed{};
     };
 
     boost::asio::awaitable<void> Run() {
@@ -269,13 +384,12 @@ class Session;
         request.headers = Headers::FromBeast(std::move(message.base()));
         auto context = ContextFromHeaders(request.headers,
                                           options_.tracingEnabled);
-        std::shared_ptr<RequestCancellation> requestCancellation;
         if (router_->RequiresDisconnectObservation(request.method,
                                                    request.path)) {
-          requestCancellation = std::make_shared<RequestCancellation>();
+          activeCancellation_ = std::make_shared<RequestCancellation>();
           context = std::move(context).withExternalCancellation(
-              requestCancellation->source.get_token());
-          ObserveDisconnect(requestCancellation);
+              activeCancellation_->source.get_token());
+          ObserveDisconnect();
         }
 
         Response response;
@@ -292,11 +406,9 @@ class Session;
           response = {500, {}, "internal server error\n",
                       "text/plain; charset=utf-8", false};
         }
-        if (requestCancellation) {
-          requestCancellation->disarmed.store(true, std::memory_order_release);
-          requestCancellation->observer.emit(
-              boost::asio::cancellation_type::all);
-        }
+        // Keep the readiness wait across keep-alive requests. Only the current
+        // request's cancellation source is eligible for a disconnect signal.
+        activeCancellation_.reset();
         const bool keepAlive = response.keepAlive && requestKeepAlive;
         if (!(co_await Write(std::move(response), version, keepAlive))) break;
         requestInProgress_ = false;
@@ -309,34 +421,30 @@ class Session;
                                 ignored);
     }
 
-    void ObserveDisconnect(
-        const std::shared_ptr<RequestCancellation>& cancellation) {
+    void ObserveDisconnect() {
+      if (disconnectWaitPending_) return;
+      disconnectWaitPending_ = true;
       stream_.socket().async_wait(
           boost::asio::ip::tcp::socket::wait_read,
-          boost::asio::bind_cancellation_slot(
-              cancellation->observer.slot(),
-              [self = shared_from_this(), cancellation](
-                  const boost::system::error_code& error) {
-                self->CheckDisconnect(cancellation, error);
-              }));
+          [self = shared_from_this()](const boost::system::error_code& error) {
+            self->CheckDisconnect(error);
+          });
     }
 
-    void CheckDisconnect(
-        const std::shared_ptr<RequestCancellation>& cancellation,
-        const boost::system::error_code& observerError) noexcept {
-      if (cancellation->disarmed.load(std::memory_order_acquire)) {
-        return;
-      }
+    void CheckDisconnect(const boost::system::error_code& observerError) noexcept {
+      disconnectWaitPending_ = false;
+      const auto cancellation = activeCancellation_;
+      if (!cancellation) return;
       if (observerError) {
-        // While the handler is still active, cancellation of the socket wait
-        // means the session was closed by shutdown or by the peer. The normal
-        // response path sets disarmed before cancelling only this observer.
+        // Socket cancellation now occurs at connection shutdown, not once for
+        // every successfully completed request.
         cancellation->source.request_stop();
         return;
       }
 
-      // Peek without consuming bytes. The wait is active only while the
-      // handler owns the request, before the next Beast read starts. A
+      // All observer state and Beast reads share the socket strand. An idle
+      // readiness completion is ignored; a new handler either reuses the
+      // pending wait or arms a new one. Peek without consuming bytes. A
       // successful zero-byte receive is EOF; reset/closed errors are also a
       // disconnect. Readable application data is a pipelined next request and
       // proves that the peer is still present, so it must not be consumed or
@@ -354,14 +462,14 @@ class Session;
         cancellation->source.request_stop();
         return;
       }
-      if (wouldBlock) ObserveDisconnect(cancellation);
+      if (wouldBlock) ObserveDisconnect();
     }
 
     boost::asio::awaitable<bool> Write(Response response, unsigned version,
                                        bool keepAlive) {
       boost::beast::http::response<boost::beast::http::string_body> message{
           static_cast<boost::beast::http::status>(response.status), version};
-      message.set(boost::beast::http::field::server, "cppboostservicelib");
+      message.set(boost::beast::http::field::server, "cppcoroservicelib");
       message.set(boost::beast::http::field::content_type, response.contentType);
       for (const auto& [name, value] : response.headers) message.set(name, value);
       message.keep_alive(keepAlive);
@@ -390,6 +498,8 @@ class Session;
     boost::asio::any_io_executor workerExecutor_;
     std::shared_ptr<Router> router_;
     Options options_;
+    std::shared_ptr<RequestCancellation> activeCancellation_;
+    bool disconnectWaitPending_{};
     bool requestInProgress_{};
     bool shuttingDown_{};
   };
@@ -407,16 +517,17 @@ class Session;
   }
 
   static boost::asio::awaitable<void> AcceptLoop(
-      std::shared_ptr<boost::asio::ip::tcp::acceptor> acceptor,
+      std::shared_ptr<Listener> listener,
       std::shared_ptr<std::atomic<bool>> running,
       std::shared_ptr<std::atomic<std::uint64_t>> acceptedConnections,
       std::shared_ptr<Router> router, Options options,
-      std::shared_ptr<SessionRegistry> sessionRegistry) {
+      std::shared_ptr<SessionRegistry> sessionRegistry,
+      boost::asio::any_io_executor executor) {
     while (running->load(std::memory_order_acquire)) {
       boost::system::error_code error;
       boost::asio::ip::tcp::socket socket(
-          boost::asio::make_strand(acceptor->get_executor()));
-      co_await acceptor->async_accept(
+          listener->strand);
+      co_await listener->acceptor->async_accept(
           socket,
           boost::asio::redirect_error(boost::asio::use_awaitable, error));
       if (error) {
@@ -430,23 +541,35 @@ class Session;
         socket.close(ignored);
         break;
       }
-      auto session = std::make_shared<Session>(
-          std::move(socket), acceptor->get_executor(), router, options);
+      const auto protocol = socket.local_endpoint().protocol();
+      NativeSocket descriptor(socket.release());
+      auto destination = servicelib::async::WorkerIoContext::NextConnectionExecutor(executor);
+      auto strand = boost::asio::make_strand(destination);
+      auto pending = std::make_unique<PendingAccept>(sessionRegistry);
       acceptedConnections->fetch_add(1, std::memory_order_relaxed);
-      {
-        std::lock_guard lock(sessionRegistry->mutex);
-        if (!running->load(std::memory_order_acquire)) continue;
-        if (sessionRegistry->sessions.empty()) sessionRegistry->drained.reset();
-        sessionRegistry->sessions.emplace(session.get(), session);
-      }
-      session->Start(sessionRegistry);
+      boost::asio::post(strand,
+          [strand, destination, running, router, options, sessionRegistry, protocol,
+           descriptor = std::move(descriptor), pending = std::move(pending)]() mutable {
+        if (!running->load(std::memory_order_acquire)) return;
+        boost::asio::ip::tcp::socket accepted(strand);
+        accepted.assign(protocol, descriptor.value);
+        descriptor.Release();
+        auto session = servicelib::detail::MakeStrandOwned<Session>(
+            std::move(accepted), strand, destination, router, options);
+        {
+          std::lock_guard lock(sessionRegistry->mutex);
+          if (!running->load(std::memory_order_acquire)) return;
+          sessionRegistry->sessions.emplace(session.get(), session);
+        }
+        session->Start(sessionRegistry);
+      });
     }
   }
 
   boost::asio::any_io_executor executor_;
   std::shared_ptr<Router> router_;
   Options options_;
-  std::shared_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
+  std::shared_ptr<Listener> listener_;
   std::shared_ptr<std::atomic<bool>> running_;
   std::atomic<std::uint16_t> boundPort_{};
   std::shared_ptr<std::atomic<std::uint64_t>> acceptedConnections_;
@@ -631,7 +754,7 @@ class BeastEndpoint final : public IBeastEndpoint {
         tracingEngineAvailable_(environment.getTracing() != nullptr),
         streamIdentity_(resolveStreamIdentity(environment, streamConfigId)),
         endpointName_(endpointConfig(environment, endpointId).name),
-        method_(endpointConfig(environment, endpointId).httpMethodType),
+        method_(methodName(endpointConfig(environment, endpointId).httpMethodType)),
         path_(endpointConfig(environment, endpointId).path),
         handler_(std::move(handler)),
         streamContext_(std::move(output), std::move(errorOutput)),
@@ -640,8 +763,7 @@ class BeastEndpoint final : public IBeastEndpoint {
         metrics_(environment.getMetrics(), environment.getLogger(),
                  connectorConfig(environment, endpointId).name,
                  endpointName_) {
-    if (method_ != api::HTTPMethodType::kGET &&
-        method_ != api::HTTPMethodType::kPOST) {
+    if (method_.empty()) {
       throw std::invalid_argument(
           "HTTP datasource endpoint method is undefined");
     }
@@ -891,9 +1013,14 @@ co_await boost::asio::this_coro::reset_cancellation_state(
     return Admission{std::make_shared<std::stop_source>(), std::move(generation)};
   }
 
+  static constexpr std::string_view methodName(api::HTTPMethodType method) noexcept {
+    for (const auto& [name, value] : api::kHTTPMethodTypeMap) {
+      if (value == method) return name;
+    }
+    return {};
+  }
   bool methodMatches(std::string_view method) const noexcept {
-    return (method_ == api::HTTPMethodType::kGET && method == "GET") ||
-           (method_ == api::HTTPMethodType::kPOST && method == "POST");
+    return method == method_;
   }
   static config::HttpEndpointConfig endpointConfig(
       const IServiceEnvironment& environment, int endpointId) {
@@ -958,7 +1085,7 @@ co_await boost::asio::this_coro::reset_cancellation_state(
   bool tracingEngineAvailable_;
   StreamTraceIdentity streamIdentity_;
   std::string endpointName_;
-  api::HTTPMethodType method_;
+  std::string_view method_;
   std::string path_;
   Handler handler_;
   StreamContext streamContext_;
@@ -1070,8 +1197,15 @@ class BeastDataSource final {
   void registerRoutes(servicelib::http::Router& router) {
     for (const auto& [_, endpoint] : endpoints_) {
       const auto config = endpoint->endpointConfig();
-      const std::string method =
-          config.httpMethodType == api::HTTPMethodType::kGET ? "GET" : "POST";
+      std::string method;
+      for (const auto& [name, value] : api::kHTTPMethodTypeMap) {
+        if (value == config.httpMethodType) {
+          method = name;
+          break;
+        }
+      }
+      if (method.empty())
+        throw std::invalid_argument("HTTP source endpoint method is undefined");
       router.AddShared(method, config.path,
                  [endpoint](servicelib::http::Request request,
                             MessageContext context) {

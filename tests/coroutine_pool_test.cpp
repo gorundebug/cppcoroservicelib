@@ -14,6 +14,9 @@
 #include <stop_token>
 #include <string>
 #include <vector>
+#include <array>
+#include <atomic>
+#include <thread>
 
 namespace {
 namespace asio = boost::asio;
@@ -158,5 +161,80 @@ TEST(CoroutinePool, CancellationExecutesAcceptedDelayButRejectsNewDelay) {
   stopped.get();
   EXPECT_EQ(calls, 1);
   EXPECT_EQ(pool.activeTasksApprox(), 0);
+}
+class OwnerRuntime final {
+ public:
+  OwnerRuntime() {
+    for (std::size_t i = 0; i < owners.size(); ++i)
+      owners[i] = std::make_unique<servicelib::async::WorkerIoContext>(i);
+    servicelib::async::WorkerIoContext::BindGroup({owners[0].get(), owners[1].get()});
+    for (std::size_t i = 0; i < owners.size(); ++i)
+      workers[i] = std::thread([this, i] { owners[i]->Run(); });
+    servicelib::detail::ParallelExecutorRegistry::Set(owners[0]->executor());
+  }
+  ~OwnerRuntime() {
+    servicelib::detail::ParallelExecutorRegistry::Clear();
+    for (auto& owner : owners) owner->Stop();
+    for (auto& worker : workers) worker.join();
+  }
+  std::array<std::unique_ptr<servicelib::async::WorkerIoContext>, 2> owners;
+  std::array<std::thread, 2> workers;
+};
+
+TEST(WorkerDelayPool, TimerOwnerDoesNotPinIndependentCallbacksToOneWorker) {
+  TestEnvironment environment;
+  OwnerRuntime runtime;
+  auto pool = std::make_unique<servicelib::pool::DelayPoolImpl>(environment);
+  pool->start(Context{});
+  std::array<SingleUseEvent, 2> entered;
+  SingleUseEvent release;
+  std::atomic<unsigned> observed{0};
+  std::atomic<unsigned> selfStopRejected{0};
+  for (std::size_t i = 0; i < entered.size(); ++i) {
+    pool->delay(Context{}, 10ms, [&, i]() -> asio::awaitable<void> {
+      auto* owner = servicelib::async::WorkerIoContext::Current();
+      EXPECT_NE(owner, nullptr);
+      if (owner) observed.fetch_or(1u << owner->index());
+      entered[i].Send();
+      co_await release.AsyncWait();
+      try { co_await pool->stop(Context{}); }
+      catch (const servicelib::pool::PoolSelfStopError&) { ++selfStopRejected; }
+    });
+  }
+  const auto deadline = std::chrono::steady_clock::now() + 3s;
+  for (auto& event : entered) EXPECT_TRUE(event.WaitUntil(deadline));
+  release.Send();
+  auto stopped = asio::co_spawn(runtime.owners[0]->executor(), pool->stop(Context{}), asio::use_future);
+  ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
+  stopped.get();
+  EXPECT_EQ(observed.load(), 3u);
+  EXPECT_EQ(selfStopRejected.load(), 2u);
+  EXPECT_EQ(pool->activeTasksApprox(), 0);
+  pool.reset();
+}
+
+TEST(WorkerDelayPool, CancellationPreservesAcceptedCallbackAcrossWorkers) {
+  TestEnvironment environment;
+  OwnerRuntime runtime;
+  auto pool = std::make_unique<servicelib::pool::DelayPoolImpl>(environment);
+  pool->start(Context{});
+  std::stop_source cancellation;
+  auto context = Context{}.withStopToken(cancellation.get_token());
+  std::atomic<unsigned> calls{0};
+  pool->delay(context, 1h, [&]() -> asio::awaitable<void> {
+    EXPECT_TRUE(context.cancelled());
+    EXPECT_NE(servicelib::async::WorkerIoContext::Current(), nullptr);
+    co_await asio::post(asio::use_awaitable);
+    ++calls;
+  });
+  cancellation.request_stop();
+  EXPECT_THROW(pool->delay(context, 0ms, []() -> asio::awaitable<void> { co_return; }),
+               servicelib::pool::PoolCancelledError);
+  auto stopped = asio::co_spawn(runtime.owners[1]->executor(), pool->stop(Context{}), asio::use_future);
+  ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
+  stopped.get();
+  EXPECT_EQ(calls.load(), 1u);
+  EXPECT_EQ(pool->activeTasksApprox(), 0);
+  pool.reset();
 }
 }  // namespace

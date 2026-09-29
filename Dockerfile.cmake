@@ -2,6 +2,7 @@ ARG DEPENDENCY_DOCKER_REGISTRY=docker.io
 FROM ${DEPENDENCY_DOCKER_REGISTRY}/library/ubuntu:24.04
 
 ARG TARGETARCH
+ARG CPP_CORO_IO_BACKEND=epoll
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_TRUSTED_HOST=
 ARG DEPENDENCY_APT_UBUNTU_ARCHIVE_URL=
@@ -18,12 +19,13 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,id=servicegen-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=servicegen-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     retry-dependency-command /bin/sh -c \
-      'apt-get update \
+      'case "$1" in epoll) backend_packages= ;; uring) backend_packages=liburing-dev ;; *) exit 2 ;; esac \
+       && apt-get update \
        && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           build-essential ca-certificates ccache cmake git ninja-build pkg-config \
           python3-venv \
           libboost-dev libboost-json1.83-dev libboost-context1.83-dev libssl-dev libyaml-cpp-dev \
-          libjemalloc-dev librdkafka-dev zlib1g-dev'
+          libjemalloc-dev librdkafka-dev zlib1g-dev $backend_packages' sh "$CPP_CORO_IO_BACKEND"
 
 COPY conan/dependencies_generated.py /tmp/dependencies_generated.py
 RUN CONAN_VERSION="$(python3 /tmp/dependencies_generated.py conan)" \

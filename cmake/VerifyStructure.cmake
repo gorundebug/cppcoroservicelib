@@ -1,13 +1,13 @@
 cmake_policy(SET CMP0057 NEW)
 
-set(_root "${CPPBOOSTSERVICELIB_SOURCE_DIR}/include/servicelib")
+set(_root "${CPPCOROSERVICELIB_SOURCE_DIR}/include/servicelib")
 
 # cppservicelib is the public-path authority.  Keep the full snapshot in the
 # repository so standalone/installed builds enforce the same contract without
 # requiring the canonical repository to be present.  A path may differ only
 # when it is listed below as an explicit userver boundary or its replacement.
 file(STRINGS
-    "${CPPBOOSTSERVICELIB_SOURCE_DIR}/cmake/CanonicalPublicPaths.txt"
+    "${CPPCOROSERVICELIB_SOURCE_DIR}/cmake/CanonicalPublicPaths.txt"
     _canonical_public_paths)
 
 set(_omitted_userver_boundaries
@@ -28,7 +28,7 @@ set(_omitted_userver_boundaries
 list(APPEND _omitted_userver_boundaries
     runtime/telemetry/userver/userver.hpp)
 
-set(_boost_boundary_replacements
+set(_coro_boundary_replacements
     datasink/grpc/streaming_lifecycle.hpp
     datasink/grpc/asio.hpp
     datasink/http/beast.hpp
@@ -68,6 +68,25 @@ set(_boost_boundary_replacements
     runtime/telemetry/librdkafka_statistics.hpp
     runtime/status/http.hpp)
 
+# Shared coroutine transport: explicit paths, not a wildcard exemption. The
+# graph/operator public paths retain the canonical cross-runtime structure.
+list(APPEND _coro_boundary_replacements
+    runtime/detail/grpc_callback_client.hpp
+    runtime/detail/grpc_callback_server.hpp
+    runtime/detail/grpc_callback_stream.hpp
+    runtime/detail/grpc_client_common.hpp
+    runtime/detail/grpc_client_writer.hpp
+    runtime/detail/grpc_source_handlers.hpp
+    runtime/detail/coro_event_engine.hpp
+    runtime/detail/coro_resolver.hpp
+    runtime/detail/coro_runtime.hpp)
+
+# Coro owns descriptor/timer access and destruction on the associated I/O
+# worker or strand. Userver supplies that ownership in its task runtime.
+list(APPEND _coro_boundary_replacements
+    runtime/detail/strand_owned.hpp
+    runtime/detail/worker_io_context.hpp)
+
 foreach(_path IN LISTS _canonical_public_paths)
   if(NOT EXISTS "${_root}/${_path}")
     if(NOT _path IN_LIST _omitted_userver_boundaries)
@@ -80,7 +99,7 @@ file(GLOB_RECURSE _actual_public_paths
     LIST_DIRECTORIES FALSE RELATIVE "${_root}" "${_root}/*")
 foreach(_path IN LISTS _actual_public_paths)
   if(NOT _path IN_LIST _canonical_public_paths AND
-     NOT _path IN_LIST _boost_boundary_replacements)
+     NOT _path IN_LIST _coro_boundary_replacements)
     message(FATAL_ERROR
         "non-canonical public path has no recorded userver boundary: ${_path}")
   endif()

@@ -38,7 +38,7 @@ claims and limitations. Everything below this section is historical progress.
 The experiment is isolated in `cppcoroservicelib`, `cppcoroexample`, and
 `hotcore-migration/hotcore_coro`. Hotcore was copied from the already-built typed
 Boost acceptance project in `/tmp/cpp-typed-acceptance/hotcore-boost/hotcoremigration`.
-The source projects `cppboostservicelib` and `cppboostexample` remain unchanged.
+The source projects `cppcoroservicelib` and `cppboostexample` remain unchanged.
 The copies have been created; the graph migration is in progress and is not
 validated yet. Existing CMake target names are still inherited from Boost.
 Docker test image/cache names and example project image/volume names are isolated.
@@ -274,7 +274,7 @@ Validation attempts:
    dependency-download-mirrors.env, without copying settings or secrets.
 3. The environment and dependencies were prepared, but configuration now exposes
    an implementation mistake in the fork CMake: new coroutine test targets are
-   registered under BUILD_TESTING even when CPPBOOSTSERVICELIB_BUILD_TESTS=OFF.
+   registered under BUILD_TESTING even when CPPCOROSERVICELIB_BUILD_TESTS=OFF.
    In this consumer build they cannot resolve GTest::gtest_main. The failure was
    reported; the CMake test registration has NOT been corrected in this turn.
    Log: /tmp/cppcoro-canonical-inventory-compose-ready.log.
@@ -298,7 +298,7 @@ business topology, common generator, and other languages were not modified.
   only after awaiting downstream delivery. Added real producer-order, Done-order,
   and sink-result-validation tests covering those handlers.
 - Corrected coroutine CMake test registration to honor
-  CPPBOOSTSERVICELIB_BUILD_TESTS. Corrected the unary test's grpc link dependency.
+  CPPCOROSERVICELIB_BUILD_TESTS. Corrected the unary test's grpc link dependency.
 - Canonical InventoryService compiled in its stock Docker/Conan environment:
   four behavior tests passed, one pre-existing contract placeholder skipped.
   Log: /tmp/cppcoro-canonical-inventory-tests.log.
@@ -513,7 +513,7 @@ migration, not a passing full suite. See FAILED targets and diagnostics in
   and direct awaits. All ordering/cancellation/resize/metrics/self-stop assertions
   are retained. Compilation exposed a reported script syntax mistake: callback
   lambdas have `] -> boost::asio::awaitable<void>` and need `]() -> ...` for C++20.
-  Fix this before repeating cppboostservicelib_taskpool_test.
+  Fix this before repeating cppcoroservicelib_taskpool_test.
   Log /tmp/cppcoro-legacy-pools-cron.log, session 42133 exit 1.
 - Ported other_pools_test.cpp (PriorityTaskPool/DelayPool/Go contract checks).
   Host-only stop wrapper and asynchronous Event preserve the original assertions.
@@ -576,7 +576,7 @@ remain in force.
 - Docker /tmp/cppcoro-core-coroutine-regressions.log: all six CTest targets passed
   (structure, cron, taskpool, other_pools, direct_caller_queue, substream).
 - Replaced tests/cooperative_execution_test.cpp with coroutine_execution_test.cpp
-  and updated its CMake target to cppboostservicelib_coroutine_execution_test.
+  and updated its CMake target to cppcoroservicelib_coroutine_execution_test.
   All 15 behavior tests passed in Docker (/tmp/cppcoro-execution-regressions.log).
   Coverage includes graph/input/parallel-child draining, deadlines, callback
   capture cleanup, RunBlocking completion/errors, structured initialization
@@ -590,7 +590,7 @@ remain in force.
   Its lambda parser uses s.index('(', start), which accidentally selects the
   std::move(...) inside a capture list. Locate the parameter '(' AFTER the
   capture-closing ']' instead. The actual existing target is
-  cppboostservicelib_operators_test (not *_operators_compile_test).
+  cppcoroservicelib_operators_test (not *_operators_compile_test).
   The script's planned changes preserve synchronous pure selectors, await output
   collectors, use async fixture pools, and run awaits at host test boundaries.
 - Full Docker build was retried and stopped on remaining unported tests;
@@ -605,7 +605,7 @@ remain in force.
 
 - Fixed the operator migration script's capture-list parsing. Applied it to
   tests/operators_compile_test.cpp and tests/typed_graph_test.hpp. The actual
-  cppboostservicelib_operators_test target passed in Docker; log
+  cppcoroservicelib_operators_test target passed in Docker; log
   /tmp/cppcoro-operator-regressions.log. Static/fluent graph comparisons and
   caller/serde/order assertions remain enabled.
 - Ported tests/operators_topology_test.cpp, tests/join_topology_test.cpp and
@@ -626,7 +626,7 @@ remain in force.
   coroutine writers/response callbacks and nested SubStream handlers. Its build
   currently fails ONLY on the missing direct include <boost/asio/use_future.hpp>
   according to /tmp/cppcoro-grpc-network-regressions.log; add it next and rerun
-  cppboostservicelib_grpc_streaming_test. Removed CooperativeExecution wrappers
+  cppcoroservicelib_grpc_streaming_test. Removed CooperativeExecution wrappers
   and replaced scope assertions with executor/context/progress checks. Native
   gRPC transcript comparison and cancellation/deadline tests remain unchanged.
 - All sessions/containers from this continuation have finished. No build active.
@@ -646,7 +646,7 @@ correct mistakes.
 ## Progress 2026-09-27: original transport regressions
 
 - The original real-network grpc_streaming target now builds and passes in Docker
-  (cppboostservicelib_grpc_streaming_test, 0.31 seconds).
+  (cppcoroservicelib_grpc_streaming_test, 0.31 seconds).
 - Migrated custom_endpoints_test.cpp producer/handler signatures and result
   callbacks to awaitables; preserved the original behavioral scenarios.
 - Its first Docker build failed in my fixture adaptation, before runtime checks.
@@ -661,11 +661,11 @@ correct mistakes.
 ## Progress 2026-09-27: custom/Kafka passed, HTTP fixture migration
 
 - Corrected the previously reported custom fixture namespace and coroutine-call
-  mistakes. cppboostservicelib_custom_endpoints_test passed in Docker (0.22s).
+  mistakes. cppcoroservicelib_custom_endpoints_test passed in Docker (0.22s).
   Log: /tmp/cppcoro-custom-regressions-retry.log; session 41765 exit 0.
 - Ported original Kafka handler/input/collector and delivery callback tests to
   awaitables without changing transport semantics or low-level blocking clients.
-  cppboostservicelib_kafka_endpoints_test passed (9.23s), including mock broker
+  cppcoroservicelib_kafka_endpoints_test passed (9.23s), including mock broker
   protocol, partition ordering/concurrency, commit, async delivery and stop.
   Log: /tmp/cppcoro-kafka-regressions.log; session 79874 exit 0.
 - Ported HTTP fixtures, replacing 5 CooperativeExecution test wrappers with direct

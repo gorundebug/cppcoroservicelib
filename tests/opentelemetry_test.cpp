@@ -139,7 +139,7 @@ TEST(OpenTelemetry, EmitsTypedStructuredLogsAndFlushesBeforeShutdown) {
 }
 
 TEST(OpenTelemetry, ExportsStructuredLogsThroughRealOtlpGrpcCollector) {
-  if (std::getenv("CPPBOOSTSERVICELIB_RUN_OTLP_LOG_INTEGRATION") == nullptr) {
+  if (std::getenv("CPPCOROSERVICELIB_RUN_OTLP_LOG_INTEGRATION") == nullptr) {
     GTEST_SKIP() << "real OTLP collector integration is opt-in";
   }
 

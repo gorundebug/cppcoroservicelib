@@ -1,4 +1,5 @@
 build/
+.artifacts/
 .git/
 .DS_Store
 .idea/

@@ -990,7 +990,7 @@ TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {
   connector.dialTimeout = 5000;
   servicelib::config::KafkaEndpointConfig endpoint;
   endpoint.topic = "events";
-  endpoint.consumerGroup = "cppboostservicelib-tests";
+  endpoint.consumerGroup = "cppcoroservicelib-tests";
   cluster.setGroupCoordinator(endpoint.consumerGroup);
 
   servicelib::datasink::kafka::LibrdkafkaProducerClient producer{
@@ -1051,7 +1051,7 @@ TEST(LibrdkafkaClients, PreservesPartitionOrderAndRunsPartitionsConcurrently) {
   servicelib::config::KafkaDataConnectorConfig connector;
   connector.brokers = cluster.brokers();
   connector.dialTimeout = 5000;
-  const std::string group = "cppboostservicelib-partition-lanes";
+  const std::string group = "cppcoroservicelib-partition-lanes";
   cluster.setGroupCoordinator(group);
 
   servicelib::datasink::kafka::LibrdkafkaProducerClient producer{
@@ -1165,7 +1165,7 @@ TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
   connector.dialTimeout = 2000;
   servicelib::config::KafkaEndpointConfig endpoint;
   endpoint.topic = "events";
-  endpoint.consumerGroup = "cppboostservicelib-broker-loss";
+  endpoint.consumerGroup = "cppcoroservicelib-broker-loss";
   cluster.setGroupCoordinator(endpoint.consumerGroup);
 
   servicelib::datasink::kafka::LibrdkafkaProducerClient producer{

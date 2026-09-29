@@ -1,0 +1,10 @@
+syntax = "proto3";
+package servicelib.coro_test;
+
+message Message { string value = 1; }
+service Transport {
+  rpc Unary(Message) returns (Message);
+  rpc ServerStream(Message) returns (stream Message);
+  rpc ClientStream(stream Message) returns (Message);
+  rpc Bidi(stream Message) returns (stream Message);
+}

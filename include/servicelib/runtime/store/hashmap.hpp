@@ -3,6 +3,8 @@
 #include <servicelib/api/serviceapi.hpp>
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
 #include <servicelib/runtime/detail/mutex.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/store/joinstore.hpp>
 #include <servicelib/runtime/store/rotatingmap.hpp>
@@ -34,13 +36,14 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
   using Duration = JoinStorageConfig::Duration;
 
   HashMapJoinStorage(IServiceEnvironment& env, JoinStorageConfig config)
-      : state_(std::make_shared<State>(
+      : state_(detail::MakeStrandOwned<State>(
             detail::ParallelExecutorRegistry::Get(), std::move(config),
             env.getMetrics(), [&env] {
               const auto service = env.getServiceConfigSnapshot();
               return service ? service->name : std::string{};
             }())) {}
   ~HashMapJoinStorage() override {
+    std::lock_guard lock(state_->mutex);
     if (state_->running) std::terminate();
   }
 
@@ -49,7 +52,13 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
     if (state_->running) throw StoreAlreadyStartedError();
     if (state_->stopped) throw StoreStoppedError();
     state_->running = true;
-    if (state_->config.ttl > Duration::zero()) ArmRotation(state_);
+    if (state_->config.ttl > Duration::zero()) {
+      const auto first = Clock::now() + state_->config.ttl;
+      boost::asio::post(state_->strand, [state = state_, first] {
+        std::lock_guard ownerLock(state->mutex);
+        if (state->running) ArmRotation(state, first);
+      });
+    }
   }
 
   [[nodiscard]] boost::asio::awaitable<void> stop(
@@ -58,8 +67,10 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
       std::lock_guard lock(state_->mutex);
       state_->running = false;
       state_->stopped = true;
-      static_cast<void>(state_->rotationTimer.cancel());
     }
+    co_await boost::asio::this_coro::reset_cancellation_state(
+        boost::asio::disable_cancellation());
+    co_await boost::asio::co_spawn(state_->strand, StopRotation(state_), boost::asio::use_awaitable);
     // JoinValue and expiry callbacks keep shared admission across suspension.
     // Stop drains them without blocking the executor or destroying their data.
     auto operations = co_await state_->operations.lock();
@@ -80,7 +91,7 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
       auto lock = co_await item->mutex.lock();
       item->processed = true;
       ++item->generation;
-      static_cast<void>(item->timer.cancel());
+      co_await boost::asio::co_spawn(item->strand, StopExpiry(item), boost::asio::use_awaitable);
     }
   }
 
@@ -117,7 +128,7 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
       item->processed = co_await callback(item->values);
       if (item->processed) {
         ++item->generation;
-        static_cast<void>(item->timer.cancel());
+        CancelExpiry(item);
         itemLock.reset();
         RemoveIfSame(key, item, false);
       }
@@ -141,11 +152,12 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
   struct State;
   struct Item final {
     explicit Item(boost::asio::any_io_executor executor)
-        : timer(std::move(executor)) {}
+        : strand(boost::asio::make_strand(std::move(executor))) {}
     detail::Mutex mutex;
     JoinValues values;
     JoinValueFunction callback;
-    boost::asio::steady_timer timer;
+    boost::asio::strand<boost::asio::any_io_executor> strand;
+    std::optional<boost::asio::steady_timer> timer;
     std::vector<std::unique_ptr<Cancellation>> cancellations;
     std::optional<Clock::time_point> deadline;
     std::uint64_t generation{};
@@ -155,9 +167,9 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
     State(boost::asio::any_io_executor executor, JoinStorageConfig value,
           metrics::Metrics& metrics, std::string service)
         : executor(std::move(executor)),
+          strand(boost::asio::make_strand(this->executor)),
           config(std::move(value)),
-          metricsEnabled(metrics.enabled()),
-          rotationTimer(this->executor) {
+          metricsEnabled(metrics.enabled()) {
       auto scope = metrics.scope(
           "hashmap_join_storage",
           {{"service", std::move(service)}, {"name", config.name}});
@@ -167,13 +179,14 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
           "Total number of items evicted from join storage by TTL");
     }
     boost::asio::any_io_executor executor;
+    boost::asio::strand<boost::asio::any_io_executor> strand;
     JoinStorageConfig config;
     bool metricsEnabled{};
     mutable std::mutex mutex;
     detail::SharedMutex operations;
     std::unordered_map<K, std::shared_ptr<Item>, Hash, Equal> current;
     std::unordered_map<K, std::shared_ptr<Item>, Hash, Equal> previous;
-    boost::asio::steady_timer rotationTimer;
+    std::optional<boost::asio::steady_timer> rotationTimer;
     std::size_t highWaterMark{};
     std::atomic<std::size_t> evictions{};
     std::unique_ptr<metrics::Int64Gauge> count;
@@ -203,7 +216,8 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
     if (const auto found = state_->previous.find(key);
         found != state_->previous.end())
       return {found->second, false};
-    auto item = std::make_shared<Item>(state_->executor);
+    auto* owner = servicelib::async::WorkerIoContext::Current();
+    auto item = detail::MakeStrandOwned<Item>(owner ? owner->executor() : state_->executor);
     item->values.resize(index + 1);
     item->callback = callback;
     state_->current.emplace(key, item);
@@ -214,13 +228,18 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
   void ArmExpiry(const K& key, const std::shared_ptr<Item>& item,
                  const Context& context) {
     const auto generation = ++item->generation;
-    static_cast<void>(item->timer.cancel());
-    item->timer.expires_at(*item->deadline);
     const std::weak_ptr<State> weakState = state_;
     const std::weak_ptr<Item> weakItem = item;
-    item->timer.async_wait([weakState, weakItem, key, generation](
-                               const boost::system::error_code& error) {
-      if (!error) ScheduleExpiry(weakState, key, weakItem, generation);
+    // The per-key mutex orders arm/cancel commands across callers. Capture
+    // immutable timer inputs; only the owner strand touches the timer itself.
+    boost::asio::post(item->strand,
+        [item, weakState, weakItem, key, generation, deadline = *item->deadline] {
+      if (!item->timer) item->timer.emplace(item->strand);
+      item->timer->expires_at(deadline);
+      item->timer->async_wait([weakState, weakItem, key, generation](
+                                 const boost::system::error_code& error) {
+        if (!error) ScheduleExpiry(weakState, key, weakItem, generation);
+      });
     });
     auto expire = [weakState, weakItem, key, generation] {
       ScheduleExpiry(weakState, key, weakItem, generation);
@@ -238,13 +257,25 @@ class HashMapJoinStorage final : public IJoinStorage<K> {
           std::make_unique<Cancellation>(token, callback));
   }
 
+  static void CancelExpiry(const std::shared_ptr<Item>& item) {
+    boost::asio::post(item->strand, [item] {
+      if (item->timer) item->timer->cancel();
+    });
+  }
+
+  static boost::asio::awaitable<void> StopExpiry(std::shared_ptr<Item> item) {
+    item->timer.reset();
+    co_return;
+  }
+
 static void ScheduleExpiry(std::weak_ptr<State> weakState, K key,
                            std::weak_ptr<Item> weakItem,
                            std::uint64_t generation) {
   const auto state = weakState.lock();
-  if (!state) return;
+  const auto item = weakItem.lock();
+  if (!state || !item) return;
   boost::asio::co_spawn(
-      state->executor,
+      item->strand.get_inner_executor(),
       Expire(std::move(weakState), std::move(key), std::move(weakItem), generation),
       [](std::exception_ptr error) {
         if (error) std::rethrow_exception(error);
@@ -310,17 +341,23 @@ static boost::asio::awaitable<void> Expire(std::weak_ptr<State> weakState, K key
     }
   }
 
-  static void ArmRotation(const std::shared_ptr<State>& state) {
-    state->rotationTimer.expires_after(state->config.ttl);
+  static boost::asio::awaitable<void> StopRotation(std::shared_ptr<State> state) {
+    state->rotationTimer.reset();
+    co_return;
+  }
+
+  static void ArmRotation(const std::shared_ptr<State>& state, Clock::time_point deadline) {
+    if (!state->rotationTimer) state->rotationTimer.emplace(state->strand);
+    state->rotationTimer->expires_at(deadline);
     const std::weak_ptr<State> weak = state;
-    state->rotationTimer.async_wait(
+    state->rotationTimer->async_wait(
         [weak](const boost::system::error_code& error) {
           if (error) return;
           const auto state = weak.lock();
           if (!state) return;
           Rotate(*state);
           std::lock_guard lock(state->mutex);
-          if (state->running) ArmRotation(state);
+          if (state->running) ArmRotation(state, Clock::now() + state->config.ttl);
         });
   }
 

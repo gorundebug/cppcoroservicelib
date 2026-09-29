@@ -34,8 +34,8 @@ inline constexpr std::array kProgrammingLanguageMap{
     std::pair{"CppUserver"sv, ProgrammingLanguage::kCppUserver},
     std::pair{"Python"sv, ProgrammingLanguage::kPython},
     std::pair{"Rust"sv, ProgrammingLanguage::kRust},
-    std::pair{"CppBoost"sv, ProgrammingLanguage::kCppBoost},
-    std::pair{"TypeScript"sv, ProgrammingLanguage::kTypeScript}};
+    std::pair{"TypeScript"sv, ProgrammingLanguage::kTypeScript},
+    std::pair{"CppCoro"sv, ProgrammingLanguage::kCppCoro}};
 
 inline ProgrammingLanguage Parse(const config::YamlValue& value,
                          config::TypeTag<ProgrammingLanguage>) {

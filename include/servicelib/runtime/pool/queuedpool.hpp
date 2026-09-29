@@ -1,6 +1,8 @@
 #pragma once
 
 #include <servicelib/runtime/detail/task_executor.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/cancellation_state.hpp>
 
@@ -53,10 +55,7 @@ class QueuedPool {
         : name(std::move(poolName)),
           env(environment),
           executor(detail::ParallelExecutorRegistry::Get()),
-          strand(boost::asio::make_strand(executor)),
-          managerTimer(strand),
-          lifecycleDeadline(strand),
-          deadlineTimer(strand) {
+          strand(boost::asio::make_strand(executor)) {
       const auto config = env.getRuntimeConfigSnapshot();
       const auto* pool = config ? config->GetPoolByName(name) : nullptr;
       if (!pool)
@@ -98,7 +97,7 @@ class QueuedPool {
     IServiceEnvironment& env;
     boost::asio::any_io_executor executor;
     boost::asio::strand<boost::asio::any_io_executor> strand;
-    boost::asio::steady_timer managerTimer, lifecycleDeadline, deadlineTimer;
+    std::optional<boost::asio::steady_timer> managerTimer, lifecycleDeadline, deadlineTimer;
     std::mutex activityMutex;
     std::uint64_t activity{};
     std::atomic<int> target{0};
@@ -133,7 +132,7 @@ class QueuedPool {
 
  public:
   QueuedPool(std::string name, IServiceEnvironment& env)
-      : state_(std::make_shared<State>(std::move(name), env)) {}
+      : state_(detail::MakeStrandOwned<State>(std::move(name), env)) {}
 
   ~QueuedPool() {
     std::uint64_t activity;
@@ -346,8 +345,8 @@ class QueuedPool {
   }
   static void stopManager(const std::shared_ptr<State>& state) {
     state->managerActive = false;
-    state->managerTimer.cancel();
-    state->lifecycleDeadline.cancel();
+    if (state->managerTimer) state->managerTimer->cancel();
+    if (state->lifecycleDeadline) state->lifecycleDeadline->cancel();
   }
   static void installLifecycle(const std::shared_ptr<State>& state,
                                const Context& context) {
@@ -372,17 +371,19 @@ class QueuedPool {
             std::make_unique<CancelCallback>(token, cancel));
     }
     if (context.deadline()) {
-      state->lifecycleDeadline.expires_at(*context.deadline());
-      state->lifecycleDeadline.async_wait(
+      if (!state->lifecycleDeadline) state->lifecycleDeadline.emplace(state->strand);
+      state->lifecycleDeadline->expires_at(*context.deadline());
+      state->lifecycleDeadline->async_wait(
           [cancel](const boost::system::error_code& error) {
             if (!error) cancel();
           });
     }
   }
   static void scheduleManager(const std::shared_ptr<State>& state) {
-    state->managerTimer.expires_after(std::chrono::seconds(1));
+    if (!state->managerTimer) state->managerTimer.emplace(state->strand);
+    state->managerTimer->expires_after(std::chrono::seconds(1));
     const std::weak_ptr<State> weak(state);
-    state->managerTimer.async_wait(
+    state->managerTimer->async_wait(
         [weak](const boost::system::error_code& error) {
           const auto state = weak.lock();
           if (error || !state || !state->managerActive || state->stopping)
@@ -424,12 +425,13 @@ class QueuedPool {
     state->armedAt = next;
     const auto generation = ++state->deadlineGeneration;
     if (!next) {
-      state->deadlineTimer.cancel();
+      if (state->deadlineTimer) state->deadlineTimer->cancel();
       return;
     }
-    state->deadlineTimer.expires_at(*next);
+    if (!state->deadlineTimer) state->deadlineTimer.emplace(state->strand);
+    state->deadlineTimer->expires_at(*next);
     const std::weak_ptr<State> weak(state);
-    state->deadlineTimer.async_wait(
+    state->deadlineTimer->async_wait(
         [weak, generation](const boost::system::error_code& error) {
           const auto state = weak.lock();
           if (!state || error || generation != state->deadlineGeneration)
@@ -463,7 +465,8 @@ class QueuedPool {
       ++state->busy;
       publish(*state);
       boost::asio::co_spawn(
-          boost::asio::any_io_executor{detail::TaskExecutor{state->executor, state.get()}},
+          boost::asio::any_io_executor{detail::TaskExecutor{
+              servicelib::async::WorkerIoContext::NextExecutor(state->executor), state.get()}},
           [state, task]() -> boost::asio::awaitable<void> {
         task->cancellations.clear();
         const auto started = state->metricsEnabled

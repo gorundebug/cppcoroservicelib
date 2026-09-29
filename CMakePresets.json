@@ -8,7 +8,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CPPBOOSTSERVICELIB_BUILD_TESTS": "ON"
+        "CPPCOROSERVICELIB_BUILD_TESTS": "ON"
       }
     },
     {
@@ -24,44 +24,44 @@
     {
       "name": "asan",
       "inherits": "debug",
-      "cacheVariables": {"CPPBOOSTSERVICELIB_ASAN": "ON"}
+      "cacheVariables": {"CPPCOROSERVICELIB_ASAN": "ON"}
     },
     {
       "name": "ubsan",
       "inherits": "debug",
-      "cacheVariables": {"CPPBOOSTSERVICELIB_UBSAN": "ON"}
+      "cacheVariables": {"CPPCOROSERVICELIB_UBSAN": "ON"}
     },
     {
       "name": "asan-ubsan",
       "inherits": "debug",
       "cacheVariables": {
-        "CPPBOOSTSERVICELIB_ASAN": "ON",
-        "CPPBOOSTSERVICELIB_UBSAN": "ON"
+        "CPPCOROSERVICELIB_ASAN": "ON",
+        "CPPCOROSERVICELIB_UBSAN": "ON"
       }
     },
     {
       "name": "tsan",
       "inherits": "debug",
-      "cacheVariables": {"CPPBOOSTSERVICELIB_TSAN": "ON"}
+      "cacheVariables": {"CPPCOROSERVICELIB_TSAN": "ON"}
     },
     {
       "name": "coverage",
       "inherits": "debug",
-      "cacheVariables": {"CPPBOOSTSERVICELIB_COVERAGE": "ON"}
+      "cacheVariables": {"CPPCOROSERVICELIB_COVERAGE": "ON"}
     },
     {
       "name": "profiling",
       "inherits": "release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CPPBOOSTSERVICELIB_PROFILING": "ON"
+        "CPPCOROSERVICELIB_PROFILING": "ON"
       }
     },
     {
       "name": "coroutine-diagnostics",
       "inherits": "profiling",
       "cacheVariables": {
-        "CPPBOOSTSERVICELIB_COROUTINE_DIAGNOSTICS": "ON"
+        "CPPCOROSERVICELIB_COROUTINE_DIAGNOSTICS": "ON"
       }
     }
   ],

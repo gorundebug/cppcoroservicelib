@@ -1,10 +1,17 @@
 #pragma once
 
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
 #include <servicelib/runtime/store/storage.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
 #include <array>
 #include <chrono>
@@ -31,12 +38,13 @@ class RotatingMap final : public IStorage {
 
   explicit RotatingMap(Duration interval,
                        std::size_t minCapacity = kRotatingMapMinCapacity)
-      : state_(std::make_shared<State>(
+      : state_(detail::MakeStrandOwned<State>(
             detail::ParallelExecutorRegistry::Get(), interval, minCapacity)) {
     if (interval <= Duration::zero())
       throw std::invalid_argument("rotating map interval must be positive");
   }
   ~RotatingMap() override {
+    std::lock_guard lock(state_->lifecycleMutex);
     if (state_->running) std::terminate();
   }
 
@@ -45,15 +53,23 @@ class RotatingMap final : public IStorage {
     if (state_->running) throw StoreAlreadyStartedError();
     if (state_->stopped) throw StoreStoppedError();
     state_->running = true;
-    Arm(state_);
+    const auto first = std::chrono::steady_clock::now() + state_->interval;
+    boost::asio::post(state_->strand, [state = state_, first] {
+      std::lock_guard ownerLock(state->lifecycleMutex);
+      if (state->running) Arm(state, first);
+    });
   }
 
   [[nodiscard]] boost::asio::awaitable<void> stop([[maybe_unused]] Context context) override {
-    std::lock_guard lock(state_->lifecycleMutex);
-    if (state_->stopped) co_return;
-    state_->running = false;
-    state_->stopped = true;
-    static_cast<void>(state_->timer.cancel());
+    const auto state = state_;
+    {
+      std::lock_guard lock(state->lifecycleMutex);
+      state->running = false;
+      state->stopped = true;
+    }
+    co_await boost::asio::this_coro::reset_cancellation_state(
+        boost::asio::disable_cancellation());
+    co_await boost::asio::co_spawn(state->strand, StopTimer(state), boost::asio::use_awaitable);
   }
 
   void set(K key, V value) {
@@ -136,11 +152,12 @@ class RotatingMap final : public IStorage {
   struct State final {
     State(boost::asio::any_io_executor executor, Duration intervalValue,
           std::size_t minCapacityValue)
-        : timer(std::move(executor)),
+        : strand(boost::asio::make_strand(std::move(executor))),
           interval(intervalValue),
           minCapacity(minCapacityValue) {}
     std::mutex lifecycleMutex;
-    boost::asio::steady_timer timer;
+    boost::asio::strand<boost::asio::any_io_executor> strand;
+    std::optional<boost::asio::steady_timer> timer;
     Duration interval;
     std::size_t minCapacity;
     bool running{};
@@ -169,10 +186,17 @@ class RotatingMap final : public IStorage {
     return std::nullopt;
   }
 
-  static void Arm(const std::shared_ptr<State>& state) {
-    state->timer.expires_after(state->interval);
+  static boost::asio::awaitable<void> StopTimer(std::shared_ptr<State> state) {
+    state->timer.reset();
+    co_return;
+  }
+
+  static void Arm(const std::shared_ptr<State>& state,
+                  std::chrono::steady_clock::time_point deadline) {
+    if (!state->timer) state->timer.emplace(state->strand);
+    state->timer->expires_at(deadline);
     const std::weak_ptr<State> weak = state;
-    state->timer.async_wait([weak](const boost::system::error_code& error) {
+    state->timer->async_wait([weak](const boost::system::error_code& error) {
       if (error) return;
       const auto state = weak.lock();
       if (!state) return;
@@ -182,7 +206,7 @@ class RotatingMap final : public IStorage {
       }
       Rotate(*state);
       std::lock_guard lock(state->lifecycleMutex);
-      if (state->running) Arm(state);
+      if (state->running) Arm(state, std::chrono::steady_clock::now() + state->interval);
     });
   }
 

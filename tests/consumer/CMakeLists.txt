@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(cppboostservicelib_consumer LANGUAGES CXX)
+project(cppcoroservicelib_consumer LANGUAGES CXX)
 
-find_package(cppboostservicelib REQUIRED)
+find_package(cppcoroservicelib REQUIRED)
 
-add_executable(cppboostservicelib_consumer main.cpp)
-target_link_libraries(cppboostservicelib_consumer PRIVATE
+add_executable(cppcoroservicelib_consumer main.cpp)
+target_link_libraries(cppcoroservicelib_consumer PRIVATE
     servicelib::servicelib servicelib::cron)

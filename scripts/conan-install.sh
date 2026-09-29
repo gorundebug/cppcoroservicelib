@@ -12,7 +12,7 @@ install -m 0644 "$root/conan/hooks/hook_source_proxy.py" \
 install -m 0644 "$root/conan/hooks/source-proxies.generated.json" \
   "$conan_home/extensions/hooks/source-proxies.generated.json"
 build_type=${1:-Release}
-profile=${CPPBOOSTSERVICELIB_CONAN_PROFILE:-}
+profile=${CPPCOROSERVICELIB_CONAN_PROFILE:-}
 network_retry_args=(
   -cc "core.download:retry=${DEPENDENCY_COMMAND_RETRY_ATTEMPTS:-10}"
   -cc "core.download:retry_wait=${DEPENDENCY_COMMAND_RETRY_DELAY_SECONDS:-5}"
@@ -44,23 +44,24 @@ if [[ -z "$profile" ]]; then
       profile="$root/conan/profiles/macos-apple-clang-armv8"
       ;;
     *)
-      echo "unsupported Conan host: $(uname -s) $(uname -m); set CPPBOOSTSERVICELIB_CONAN_PROFILE" >&2
+      echo "unsupported Conan host: $(uname -s) $(uname -m); set CPPCOROSERVICELIB_CONAN_PROFILE" >&2
       exit 1
       ;;
   esac
 fi
 
 options=(
-  -o "&:with_grpc=${CPPBOOSTSERVICELIB_ENABLE_GRPC:-True}"
-  -o "&:with_kafka=${CPPBOOSTSERVICELIB_ENABLE_KAFKA:-True}"
-  -o "&:with_otel=${CPPBOOSTSERVICELIB_ENABLE_OTEL:-False}"
-  -o "&:with_tests=${CPPBOOSTSERVICELIB_BUILD_TESTS:-True}"
+  -o "&:io_backend=${CPP_CORO_IO_BACKEND:-epoll}"
+  -o "&:with_grpc=${CPPCOROSERVICELIB_ENABLE_GRPC:-True}"
+  -o "&:with_kafka=${CPPCOROSERVICELIB_ENABLE_KAFKA:-True}"
+  -o "&:with_otel=${CPPCOROSERVICELIB_ENABLE_OTEL:-False}"
+  -o "&:with_tests=${CPPCOROSERVICELIB_BUILD_TESTS:-True}"
   -o:h "openssl/*:no_engine=False"
   -o:b "openssl/*:no_engine=False"
 )
-if [[ -n "${CPPBOOSTSERVICELIB_ENABLE_CRON:-}" ]]; then
+if [[ -n "${CPPCOROSERVICELIB_ENABLE_CRON:-}" ]]; then
   options+=(
-    -o "&:with_cron=${CPPBOOSTSERVICELIB_ENABLE_CRON}"
+    -o "&:with_cron=${CPPCOROSERVICELIB_ENABLE_CRON}"
   )
 fi
 
@@ -71,7 +72,7 @@ fi
 # still reuse one source download cache.
 install -m 0644 "$root/conan/settings_user.yml" \
   "$conan_home/settings_user.yml"
-source_download_cache=${CPPBOOSTSERVICELIB_CONAN_SOURCE_CACHE:-$conan_home/source-download-cache}
+source_download_cache=${CPPCOROSERVICELIB_CONAN_SOURCE_CACHE:-$conan_home/source-download-cache}
 mkdir -p "$source_download_cache"
 source_cache_args=(
   -cc "core.sources:download_cache=$source_download_cache"
@@ -97,7 +98,7 @@ publish_built_graph() {
     --remote=dependency-cache-write --confirm --check
 }
 
-lockfile=${CPPBOOSTSERVICELIB_CONAN_LOCKFILE:-}
+lockfile=${CPPCOROSERVICELIB_CONAN_LOCKFILE:-}
 if [[ -z "$lockfile" ]]; then
   lockfile="$root/conan/locks/$(basename "$profile").lock"
 fi

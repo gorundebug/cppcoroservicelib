@@ -25,6 +25,8 @@
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/task_executor.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
@@ -57,7 +59,7 @@ class DelayPoolImpl final : public IDelayPool {
     explicit SharedState(IServiceEnvironment& environment)
         : env(environment),
           executor(detail::ParallelExecutorRegistry::Get()),
-          strand(boost::asio::make_strand(executor)), timer(strand) {
+          strand(boost::asio::make_strand(executor)) {
       const auto serviceSnapshot = env.getServiceConfigSnapshot();
       const auto* service = serviceSnapshot.get();
       metricsEnabled = env.getMetrics().enabled();
@@ -86,7 +88,7 @@ class DelayPoolImpl final : public IDelayPool {
     boost::asio::any_io_executor executor;
     // Queue/timer ownership is confined to this strand, never user callbacks.
     boost::asio::strand<boost::asio::any_io_executor> strand;
-    boost::asio::steady_timer timer;
+    std::optional<boost::asio::steady_timer> timer;
     TimerQueue timers;
     std::optional<std::chrono::steady_clock::time_point> armedAt;
     std::uint64_t generation{};
@@ -109,7 +111,7 @@ class DelayPoolImpl final : public IDelayPool {
 
  public:
   explicit DelayPoolImpl(IServiceEnvironment& env)
-      : state_(std::make_shared<SharedState>(env)) {}
+      : state_(servicelib::detail::MakeStrandOwned<SharedState>(env)) {}
 
   ~DelayPoolImpl() override {
     bool unfinished;
@@ -280,7 +282,9 @@ class DelayPoolImpl final : public IDelayPool {
     // Independent executor task, never execute user code on the timer strand.
     boost::asio::co_spawn(
         boost::asio::any_io_executor{
-            detail::TaskExecutor{task->state->executor, task->state.get()}},
+            detail::TaskExecutor{
+                servicelib::async::WorkerIoContext::NextExecutor(task->state->executor),
+                task->state.get()}},
         execute(task, expedited),
         [](std::exception_ptr error) { if (error) std::rethrow_exception(error); });
   }
@@ -292,9 +296,10 @@ class DelayPoolImpl final : public IDelayPool {
     if (next == state->armedAt) return;
     const auto generation = ++state->generation;
     state->armedAt = next;
-    if (!next) { state->timer.cancel(); return; }
-    state->timer.expires_at(*next);
-    state->timer.async_wait([state, generation](const boost::system::error_code& error) {
+    if (!next) { if (state->timer) state->timer->cancel(); return; }
+    if (!state->timer) state->timer.emplace(state->strand);
+    state->timer->expires_at(*next);
+    state->timer->async_wait([state, generation](const boost::system::error_code& error) {
       if (generation != state->generation || error == boost::asio::error::operation_aborted) return;
       state->armedAt.reset();
       const auto now = std::chrono::steady_clock::now();

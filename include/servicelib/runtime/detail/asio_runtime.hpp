@@ -28,7 +28,7 @@
 #endif
 
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
-#if defined(CPPBOOSTSERVICELIB_COROUTINE_DIAGNOSTICS)
+#if defined(CPPCOROSERVICELIB_COROUTINE_DIAGNOSTICS)
 #include <servicelib/runtime/detail/asio_handler_diagnostics.hpp>
 #endif
 #include <servicelib/runtime/environment/metrics/metrics.hpp>
@@ -65,7 +65,7 @@ class RuntimeMetrics final {
           const auto locked = weak.lock();
           return locked ? locked->workerUtilization() : 0.0;
         });
-#if defined(CPPBOOSTSERVICELIB_COROUTINE_DIAGNOSTICS)
+#if defined(CPPCOROSERVICELIB_COROUTINE_DIAGNOSTICS)
     result->queuedHandlersGauge_ = scope->observableFloat64Gauge(
         "handler_queued",
         "Asio handlers known to be ready but not yet invoked",
@@ -196,7 +196,7 @@ class RuntimeMetrics final {
   std::unique_ptr<metrics::ObservableFloat64Gauge> activeWorkGauge_;
   std::unique_ptr<metrics::ObservableFloat64Gauge> eventLoopLagGauge_;
   std::unique_ptr<metrics::ObservableFloat64Gauge> workerUtilizationGauge_;
-#if defined(CPPBOOSTSERVICELIB_COROUTINE_DIAGNOSTICS)
+#if defined(CPPCOROSERVICELIB_COROUTINE_DIAGNOSTICS)
   std::unique_ptr<metrics::ObservableFloat64Gauge> queuedHandlersGauge_;
   std::unique_ptr<metrics::ObservableFloat64Gauge> runningHandlersGauge_;
   std::unique_ptr<metrics::ObservableFloat64Gauge> suspendedHandlersGauge_;

@@ -132,7 +132,7 @@ class TemporaryDirectory final {
   TemporaryDirectory() {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     path_ = std::filesystem::temp_directory_path() /
-            ("cppboostservicelib-config-" + std::to_string(suffix));
+            ("cppcoroservicelib-config-" + std::to_string(suffix));
     std::filesystem::create_directories(path_);
   }
 

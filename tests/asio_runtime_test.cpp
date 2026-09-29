@@ -60,7 +60,7 @@ int main() {
                    "runtime.event_loop_lag_seconds") != registered.end());
   assert(std::find(registered.begin(), registered.end(),
                    "runtime.worker_utilization") != registered.end());
-#if defined(CPPBOOSTSERVICELIB_COROUTINE_DIAGNOSTICS)
+#if defined(CPPCOROSERVICELIB_COROUTINE_DIAGNOSTICS)
   assert(std::find(registered.begin(), registered.end(),
                    "runtime.handler_queued") != registered.end());
   assert(std::find(registered.begin(), registered.end(),
