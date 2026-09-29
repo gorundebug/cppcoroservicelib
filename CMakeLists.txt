@@ -43,7 +43,8 @@ function(_servicelib_mark_dependency_includes_system target_name)
 endfunction()
 
 foreach(dependency_target
-    Boost::headers Boost::asio Boost::beast Boost::json)
+    Boost::headers Boost::asio Boost::beast Boost::json
+    gRPC::grpc++ gRPC::grpc protobuf::libprotobuf)
   _servicelib_mark_dependency_includes_system("${dependency_target}")
 endforeach()
 
