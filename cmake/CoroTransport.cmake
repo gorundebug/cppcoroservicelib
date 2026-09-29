@@ -10,8 +10,13 @@ endif()
 add_library(cppcoro_dns STATIC src/runtime/coro_resolver.cpp)
 target_compile_features(cppcoro_dns PUBLIC cxx_std_20)
 target_include_directories(cppcoro_dns PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+if(TARGET Boost::asio)
+  set(_coro_dns_boost_target Boost::asio)
+else()
+  set(_coro_dns_boost_target Boost::headers)
+endif()
 target_link_libraries(cppcoro_dns PUBLIC
-    $<BUILD_INTERFACE:Boost::asio>
+    $<BUILD_INTERFACE:${_coro_dns_boost_target}>
     Threads::Threads cppcoro_io
     PRIVATE ${_coro_cares} $<BUILD_INTERFACE:cppcoroservicelib_build_options>)
 set_target_properties(cppcoro_dns PROPERTIES
