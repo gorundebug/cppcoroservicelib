@@ -192,6 +192,122 @@ TEST(CoroWriteBuffers, RealSocketPreservesAllFragmentedPayload) {
   EXPECT_EQ(received, expected);
 }
 
+TEST(CoroWriteCoalescing, PacksTinyFragmentsAndPreservesLargeAddresses) {
+  const std::string small = "abc";
+  const std::string large(1024, 'L');
+  WriteBuffers buffers{boost::asio::buffer(small), {}, boost::asio::buffer(small),
+      boost::asio::buffer(large), boost::asio::buffer(small), boost::asio::buffer(small)};
+  std::string storage(12, '\0');
+  servicelib::detail::CoalesceSmallWriteBuffers(buffers, std::span<char>(storage));
+  ASSERT_EQ(buffers.size(), 3u);
+  EXPECT_EQ(buffers[0].size(), 6u);
+  EXPECT_EQ(buffers[1].data(), large.data());
+  EXPECT_EQ(buffers[1].size(), large.size());
+  EXPECT_EQ(buffers[2].size(), 6u);
+  std::string actual(12 + large.size(), '\0');
+  EXPECT_EQ(boost::asio::buffer_copy(boost::asio::buffer(actual), buffers), actual.size());
+  EXPECT_EQ(actual, small + small + large + small + small);
+}
+
+TEST(CoroWriteCoalescing, CopyBudgetLeavesRemainingFragmentsBorrowed) {
+  const std::string small = "ab";
+  WriteBuffers buffers(100, boost::asio::buffer(small));
+  std::string storage(5, '\0');
+  servicelib::detail::CoalesceSmallWriteBuffers(buffers, std::span<char>(storage));
+  ASSERT_EQ(buffers.size(), 99u);
+  EXPECT_EQ(buffers.front().size(), 4u);
+  EXPECT_EQ(buffers[1].data(), small.data());
+  EXPECT_EQ(boost::asio::buffer_size(buffers), 200u);
+  EXPECT_EQ(storage, std::string("abab\0", 5));
+}
+
+TEST(CoroWriteCoalescing, EmptyStorageDoesNotCopyAndEmptyInputIsValid) {
+  const std::string data = "data";
+  WriteBuffers buffers{{}, boost::asio::buffer(data), {}};
+  servicelib::detail::CoalesceSmallWriteBuffers(buffers, std::span<char>{});
+  ASSERT_EQ(buffers.size(), 1u);
+  EXPECT_EQ(buffers.front().data(), data.data());
+  buffers.clear();
+  servicelib::detail::CoalesceSmallWriteBuffers(buffers, std::span<char>{});
+  EXPECT_TRUE(buffers.empty());
+}
+
+TEST(CoroWriteCoalescing, PartialWritesRetainPackedStorageThroughCompletion) {
+  boost::asio::io_context io;
+  ShortWriteStream stream{io};
+  stream.limit = 3;
+  const std::string fragment = "data";
+  auto buffers = std::make_shared<WriteBuffers>(128, boost::asio::buffer(fragment));
+  auto storage = std::make_shared<std::string>(512, '\0');
+  std::weak_ptr<std::string> weak = storage;
+  servicelib::detail::CoalesceSmallWriteBuffers(*buffers, std::span<char>(*storage));
+  ASSERT_EQ(buffers->size(), 1u);
+  int callbacks = 0;
+  servicelib::detail::AsyncWriteBuffers(stream, buffers,
+      [storage, &callbacks](auto error, std::size_t size) {
+        EXPECT_FALSE(error);
+        EXPECT_EQ(size, storage->size());
+        ++callbacks;
+      });
+  storage.reset();
+  EXPECT_FALSE(weak.expired());
+  io.run();
+  EXPECT_EQ(callbacks, 1);
+  EXPECT_TRUE(weak.expired());
+  std::string expected;
+  for (int i = 0; i < 128; ++i) expected += fragment;
+  EXPECT_EQ(stream.received, expected);
+}
+
+TEST(CoroWriteCoalescing, ErrorPreservesPartialCountAndReleasesStorage) {
+  boost::asio::io_context io;
+  ShortWriteStream stream{io};
+  stream.completions = {{2, {}}, {1, boost::asio::error::broken_pipe}};
+  const std::string fragment = "abc";
+  auto buffers = std::make_shared<WriteBuffers>(100, boost::asio::buffer(fragment));
+  auto storage = std::make_shared<std::string>(300, '\0');
+  std::weak_ptr<std::string> weak = storage;
+  servicelib::detail::CoalesceSmallWriteBuffers(*buffers, std::span<char>(*storage));
+  int callbacks = 0;
+  servicelib::detail::AsyncWriteBuffers(stream, buffers,
+      [storage, &callbacks](auto error, std::size_t size) {
+        EXPECT_EQ(error, boost::asio::error::broken_pipe);
+        EXPECT_EQ(size, 3u);
+        ++callbacks;
+      });
+  storage.reset();
+  io.run();
+  EXPECT_EQ(callbacks, 1);
+  EXPECT_EQ(stream.received, "abc");
+  EXPECT_TRUE(weak.expired());
+}
+
+TEST(CoroWriteCoalescing, CancellationReleasesPackedStorage) {
+  boost::asio::io_context io;
+  ShortWriteStream stream{io};
+  stream.limit = 2;
+  boost::asio::cancellation_signal cancellation;
+  const std::string fragment = "abc";
+  auto buffers = std::make_shared<WriteBuffers>(100, boost::asio::buffer(fragment));
+  auto storage = std::make_shared<std::string>(300, '\0');
+  std::weak_ptr<std::string> weak = storage;
+  servicelib::detail::CoalesceSmallWriteBuffers(*buffers, std::span<char>(*storage));
+  int callbacks = 0;
+  servicelib::detail::AsyncWriteBuffers(stream, buffers,
+      boost::asio::bind_cancellation_slot(cancellation.slot(),
+          [storage, &callbacks](auto error, std::size_t size) {
+            EXPECT_EQ(error, boost::asio::error::operation_aborted);
+            EXPECT_EQ(size, 2u);
+            ++callbacks;
+          }));
+  storage.reset();
+  ASSERT_EQ(io.run_one(), 1u);
+  cancellation.emit(boost::asio::cancellation_type::partial);
+  io.run();
+  EXPECT_EQ(callbacks, 1);
+  EXPECT_TRUE(weak.expired());
+}
+
 TEST(CoroEventEngine, RunUsesTheSharedIoContextAndNeverRunsInline) {
   boost::asio::io_context io;
   auto engine = std::make_shared<Engine>(io);

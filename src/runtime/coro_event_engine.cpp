@@ -213,8 +213,26 @@ class CoroEndpoint final : public Engine::Endpoint {
       buffers->reserve(data->Count());
       for (std::size_t i = 0; i < data->Count(); ++i)
         buffers->emplace_back((*data)[i].data(), (*data)[i].size());
+      std::optional<ee::MutableSlice> packed;
+      if (buffers->size() > 64) {
+        constexpr std::size_t kCopyBudget = 64 * 1024;
+        constexpr std::size_t kSmallFragment = 256;
+        std::size_t copy_bytes = 0;
+        for (const auto& view : *buffers) {
+          if (view.size() <= kSmallFragment) {
+            copy_bytes += std::min(view.size(), kCopyBudget - copy_bytes);
+            if (copy_bytes == kCopyBudget) break;
+          }
+        }
+        if (copy_bytes != 0) {
+          packed.emplace(state->allocator.MakeSlice(copy_bytes));
+          servicelib::detail::CoalesceSmallWriteBuffers(
+              *buffers, std::span<char>(reinterpret_cast<char*>(packed->data()),
+                                        packed->size()), kSmallFragment);
+        }
+      }
       servicelib::detail::AsyncWriteBuffers(state->socket, buffers, asio::bind_executor(state->strand,
-          [state, buffers, data, callback = std::move(callback)](
+          [state, buffers, packed = std::move(packed), data, callback = std::move(callback)](
               ErrorCode error, std::size_t /*bytes*/) mutable {
         data->Clear();
         state->writing.store(false);

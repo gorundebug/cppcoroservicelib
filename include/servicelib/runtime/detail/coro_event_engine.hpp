@@ -7,11 +7,44 @@
 #include <grpc/event_engine/event_engine.h>
 
 #include <memory>
+#include <cstring>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace servicelib::detail {
+
+// Compact only small adjacent fragments into caller-owned quota storage.
+// Large fragments keep their original addresses. Once storage is exhausted,
+// remaining fragments are passed through without copying or waiting.
+template <typename Buffers>
+void CoalesceSmallWriteBuffers(Buffers& buffers, std::span<char> storage,
+                               std::size_t small_limit = 256) {
+  std::size_t output = 0;
+  std::size_t used = 0;
+  bool previous_copied = false;
+  for (std::size_t index = 0; index < buffers.size(); ++index) {
+    const auto buffer = buffers[index];
+    if (buffer.size() == 0) continue;
+    if (buffer.size() <= small_limit && buffer.size() <= storage.size() - used) {
+      std::memcpy(storage.data() + used, buffer.data(), buffer.size());
+      if (previous_copied) {
+        const auto previous = buffers[output - 1];
+        buffers[output - 1] = boost::asio::const_buffer(
+            previous.data(), previous.size() + buffer.size());
+      } else {
+        buffers[output++] = boost::asio::const_buffer(
+            storage.data() + used, buffer.size());
+      }
+      used += buffer.size();
+      previous_copied = true;
+    } else {
+      buffers[output++] = buffer;
+      previous_copied = false;
+    }
+  }
+  buffers.resize(output);
+}
 
 // Unlike async_write's prepared_buffers, this view does not impose a second,
 // smaller scatter/gather limit. The socket adapter retains its native limit.
