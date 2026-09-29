@@ -24,7 +24,8 @@ RUN --mount=type=cache,id=servicegen-apt-lists-${TARGETARCH},target=/var/lib/apt
        && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           build-essential ca-certificates ccache cmake git ninja-build pkg-config \
           python3-venv \
-          libboost-dev libboost-json1.83-dev libboost-context1.83-dev libc-ares-dev libssl-dev libyaml-cpp-dev \
+          libboost-dev libboost-asio1.83-dev libboost-beast1.83-dev \
+          libboost-json1.83-dev libboost-context1.83-dev libc-ares-dev libssl-dev libyaml-cpp-dev \
           libjemalloc-dev librdkafka-dev zlib1g-dev $backend_packages' sh "$CPP_CORO_IO_BACKEND"
 
 COPY conan/dependencies_generated.py /tmp/dependencies_generated.py
