@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(cppcoroservicelib VERSION 0.2.149 LANGUAGES CXX)
+project(cppcoroservicelib VERSION 0.2.150 LANGUAGES CXX)
 
 option(USE_CCACHE "Use ccache when it is available" ON)
 if(USE_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
