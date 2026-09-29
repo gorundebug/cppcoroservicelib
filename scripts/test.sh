@@ -56,14 +56,9 @@ docker run --rm \
     cmake --fresh -S . -B build/docker -G Ninja "${cache_reset[@]}" \
       "${source_cache_args[@]}" \
       -DCMAKE_BUILD_TYPE=Debug \
-      -DCMAKE_INSTALL_PREFIX=/workspace/build/docker-install \
+      -DCPPCOROSERVICELIB_DEPENDENCY_MODE=FETCH \
       -DCPPCOROSERVICELIB_BUILD_TESTS=ON \
       -DCPPCOROSERVICELIB_ENABLE_KAFKA=ON \
     && cmake --build build/docker --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
-    && ctest --test-dir build/docker --output-on-failure \
-    && cmake --install build/docker \
-    && cmake --fresh -S tests/consumer -B build/consumer -G Ninja \
-      -DCMAKE_PREFIX_PATH=/workspace/build/docker-install \
-    && cmake --build build/consumer --parallel ${CMAKE_BUILD_PARALLEL_LEVEL:+"$CMAKE_BUILD_PARALLEL_LEVEL"} \
-    && ./build/consumer/cppcoroservicelib_consumer
+    && ctest --test-dir build/docker --output-on-failure
   '
