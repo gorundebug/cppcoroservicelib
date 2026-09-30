@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/detail/sync.hpp>
-#include <boost/asio/awaitable.hpp>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -9,6 +7,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <utility>
+
+#include <boost/asio/awaitable.hpp>
+
+#include <servicelib/runtime/detail/sync.hpp>
 
 namespace servicelib::grpc_transport {
 // Coroutine send contract: return only after the actual transport write,

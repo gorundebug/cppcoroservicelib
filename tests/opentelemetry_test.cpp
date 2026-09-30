@@ -6,7 +6,6 @@
 #include <string>
 
 #include <gtest/gtest.h>
-
 #include <opentelemetry/exporters/memory/in_memory_span_exporter.h>
 #include <opentelemetry/exporters/ostream/log_record_exporter.h>
 #include <opentelemetry/sdk/logs/logger_provider_factory.h>

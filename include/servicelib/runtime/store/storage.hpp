@@ -10,9 +10,9 @@
  */
 #pragma once
 
-#include <boost/asio/awaitable.hpp>
-
 #include <stdexcept>
+
+#include <boost/asio/awaitable.hpp>
 
 #include <servicelib/runtime/context.hpp>
 

@@ -23,7 +23,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
 #include <mutex>
 
 #include <servicelib/runtime/environment/tracing/tracing.hpp>

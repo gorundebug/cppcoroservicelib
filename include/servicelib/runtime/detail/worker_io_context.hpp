@@ -1,15 +1,5 @@
 #pragma once
 
-#include <boost/asio/config.hpp>
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/prefer.hpp>
-#include <boost/asio/query.hpp>
-#include <boost/asio/require.hpp>
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +13,16 @@
 #include <vector>
 #include <sys/eventfd.h>
 #include <unistd.h>
+
+#include <boost/asio/config.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/prefer.hpp>
+#include <boost/asio/query.hpp>
+#include <boost/asio/require.hpp>
 
 namespace servicelib::async {
 

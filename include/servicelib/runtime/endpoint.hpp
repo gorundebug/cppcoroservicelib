@@ -1,8 +1,8 @@
 #pragma once
 
-#include <servicelib/runtime/caller.hpp>
-
 #include <utility>
+
+#include <servicelib/runtime/caller.hpp>
 
 namespace servicelib {
 

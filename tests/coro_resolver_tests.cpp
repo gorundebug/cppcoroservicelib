@@ -1,16 +1,18 @@
-#include <servicelib/runtime/detail/coro_resolver.hpp>
-#include <servicelib/datasink/http/client.hpp>
-#include <servicelib/datasource/http/beast.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/ip/udp.hpp>
-#include <boost/asio/use_future.hpp>
-#include <gtest/gtest.h>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <future>
 #include <set>
+
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/ip/udp.hpp>
+#include <boost/asio/use_future.hpp>
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/coro_resolver.hpp>
+#include <servicelib/datasink/http/client.hpp>
+#include <servicelib/datasource/http/beast.hpp>
 
 namespace {
 namespace asio = boost::asio;

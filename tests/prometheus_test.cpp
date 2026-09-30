@@ -1,7 +1,7 @@
-#include <servicelib/runtime/environment/metrics/prometheus.hpp>
-
 #include <cassert>
 #include <string>
+
+#include <servicelib/runtime/environment/metrics/prometheus.hpp>
 
 int main() {
   servicelib::metrics::PrometheusMetrics metrics;

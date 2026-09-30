@@ -1,10 +1,12 @@
 #pragma once
 
-#include <servicelib/datasource/grpc/common.hpp>
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
-#include <servicelib/runtime/detail/grpc_transport.hpp>
-#include <servicelib/runtime/detail/grpc_source_handlers.hpp>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include <agrpc/client_rpc.hpp>
 #include <agrpc/server_rpc.hpp>
@@ -15,13 +17,11 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
-#include <exception>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <utility>
-#include <vector>
+#include <servicelib/datasource/grpc/common.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/grpc_transport.hpp>
+#include <servicelib/runtime/detail/grpc_source_handlers.hpp>
 
 namespace servicelib::grpc_transport {
 

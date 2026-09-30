@@ -1,8 +1,5 @@
 #pragma once
 
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/this_coro.hpp>
-
 #include <exception>
 #include <functional>
 #include <memory>
@@ -10,6 +7,9 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/this_coro.hpp>
 
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
 #include <servicelib/runtime/detail/sync.hpp>

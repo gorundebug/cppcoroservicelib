@@ -1,6 +1,23 @@
 #pragma once
 
 #include <utility>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <future>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -13,32 +30,13 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/experimental/concurrent_channel.hpp>
 
 #include <servicelib/runtime/detail/http_types.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/coro_resolver.hpp>
 #include <servicelib/runtime/detail/strand_owned.hpp>
-
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <future>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/experimental/concurrent_channel.hpp>
-#include <cstdint>
-#include <deque>
-#include <functional>
-#include <memory>
-#include <mutex>
-
-#include <optional>
-#include <stdexcept>
-#include <stop_token>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
 
 namespace servicelib::http {
 

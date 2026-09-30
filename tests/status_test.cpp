@@ -1,17 +1,17 @@
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/use_future.hpp>
-
 #include <chrono>
 #include <future>
 #include <string>
 
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
 #include <yaml-cpp/yaml.h>
 
 #include <servicelib/runtime/status/status.hpp>
 #include <servicelib/runtime/status/http.hpp>
 #include <servicelib/runtime/status/web.generated.hpp>
+
 #include "mockservice/config/config.hpp"
 
 TEST(Status, BuildsLiveTopologyDataAndGraphYaml) {

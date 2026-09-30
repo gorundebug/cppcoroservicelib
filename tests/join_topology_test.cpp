@@ -1,12 +1,12 @@
-#include <gtest/gtest.h>
-
 #include <functional>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 
 #include <servicelib/runtime/store/storage.hpp>
 #include <servicelib/transformation/streams.hpp>

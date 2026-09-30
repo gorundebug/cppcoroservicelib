@@ -1,6 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -14,7 +13,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include <boost/asio/this_coro.hpp>
+#include <grpcpp/server_context.h>
 
+#include <servicelib/runtime/stream_tracing.hpp>
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/config/dataconnector_types.hpp>
 #include <servicelib/runtime/config/endpoint_types.hpp>
@@ -26,8 +28,6 @@
 #include <servicelib/runtime/detail/http_types.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/mutex.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <grpcpp/server_context.h>
 
 namespace servicelib::datasource::grpc {
 

@@ -21,7 +21,6 @@
 
 #include <string>
 #include <vector>
-
 #include <mutex>
 
 #include <servicelib/runtime/environment/log/log.hpp>

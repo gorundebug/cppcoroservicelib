@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/environment/metrics/metrics.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -16,6 +14,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <servicelib/runtime/environment/metrics/metrics.hpp>
 
 namespace servicelib::metrics {
 

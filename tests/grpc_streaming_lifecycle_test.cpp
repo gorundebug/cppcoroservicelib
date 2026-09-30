@@ -1,7 +1,3 @@
-#include <gtest/gtest.h>
-
-#include <servicelib/datasink/grpc/streaming_lifecycle.hpp>
-
 #include <atomic>
 #include <barrier>
 #include <cstddef>
@@ -9,6 +5,10 @@
 #include <memory>
 #include <thread>
 #include <vector>
+
+#include <gtest/gtest.h>
+
+#include <servicelib/datasink/grpc/streaming_lifecycle.hpp>
 
 namespace {
 

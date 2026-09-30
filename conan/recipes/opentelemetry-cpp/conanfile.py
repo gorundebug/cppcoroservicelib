@@ -1,4 +1,8 @@
 # Adapted from the Conan Center recipe to package the framework's exact pin.
+import os
+
+from dependencies_generated import VERSIONS
+
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.apple import is_apple_os
@@ -6,9 +10,6 @@ from conan.tools.files import get, copy, rmdir, replace_in_file
 from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 from conan.tools.scm import Version
-from dependencies_generated import VERSIONS
-
-import os
 
 required_conan_version = ">=2.2"
 

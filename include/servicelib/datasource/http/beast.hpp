@@ -1,35 +1,6 @@
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
 #include <utility>
-
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-#include <boost/asio/ip/address.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
-
-#include <servicelib/datasource/http/router.hpp>
-#include <servicelib/runtime/common.hpp>
-#include <servicelib/runtime/config/dataconnector_types.hpp>
-#include <servicelib/runtime/config/endpoint_types.hpp>
-#include <servicelib/runtime/datasource.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
-#include <servicelib/runtime/detail/strand_owned.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/store/rotatingmap.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -49,6 +20,34 @@
 #include <cerrno>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/ip/address.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+
+#include <servicelib/runtime/stream_tracing.hpp>
+#include <servicelib/datasource/http/router.hpp>
+#include <servicelib/runtime/common.hpp>
+#include <servicelib/runtime/config/dataconnector_types.hpp>
+#include <servicelib/runtime/config/endpoint_types.hpp>
+#include <servicelib/runtime/datasource.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/store/rotatingmap.hpp>
 
 namespace servicelib::http {
 

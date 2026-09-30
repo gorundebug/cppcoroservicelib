@@ -1,21 +1,3 @@
-#include "connector_test.grpc.pb.h"
-
-#include <servicelib/runtime/detail/grpc_streaming.hpp>
-#include <servicelib/runtime/detail/grpc_client.hpp>
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
-#include <servicelib/datasink/grpc/serverstreaming.hpp>
-#include <servicelib/transformation/streams.hpp>
-
-#include <grpcpp/create_channel.h>
-#include <grpcpp/security/credentials.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
-
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/use_future.hpp>
-
 #include <chrono>
 #include <future>
 #include <mutex>
@@ -25,6 +7,23 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/detail/grpc_streaming.hpp>
+#include <servicelib/runtime/detail/grpc_client.hpp>
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+#include <servicelib/datasink/grpc/serverstreaming.hpp>
+#include <servicelib/transformation/streams.hpp>
+
+#include "connector_test.grpc.pb.h"
 
 namespace asio = boost::asio;
 using namespace std::chrono_literals;

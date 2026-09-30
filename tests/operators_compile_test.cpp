@@ -1,8 +1,4 @@
-#include <gtest/gtest.h>
-
 #include <chrono>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
 #include <utility>
 #include <atomic>
 #include <condition_variable>
@@ -11,6 +7,10 @@
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 
 #include <servicelib/runtime/caller.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -16,15 +14,16 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
 
+#include <servicelib/runtime/stream_tracing.hpp>
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/config/dataconnector_types.hpp>
 #include <servicelib/runtime/config/endpoint_types.hpp>
 #include <servicelib/runtime/datasink.hpp>
 #include <servicelib/runtime/detail/async_operations.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/this_coro.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/environment/tracing/tracing.hpp>
 #include <servicelib/runtime/detail/http_types.hpp>

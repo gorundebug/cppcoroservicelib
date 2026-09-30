@@ -1,26 +1,3 @@
-#include "connector_test.grpc.pb.h"
-
-#include <servicelib/runtime/detail/grpc_client.hpp>
-#include <servicelib/runtime/detail/grpc_transport.hpp>
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
-#include <servicelib/runtime/detail/async_operations.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-#include <servicelib/datasink/grpc/nostreaming.hpp>
-#include <servicelib/transformation/streams.hpp>
-#include <servicelib/runtime/serviceapp.hpp>
-
-#include <grpcpp/create_channel.h>
-#include <grpcpp/security/credentials.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
-
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
-
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -34,6 +11,28 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
+#include <servicelib/runtime/detail/grpc_client.hpp>
+#include <servicelib/runtime/detail/grpc_transport.hpp>
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+#include <servicelib/runtime/detail/async_operations.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
+#include <servicelib/datasink/grpc/nostreaming.hpp>
+#include <servicelib/transformation/streams.hpp>
+#include <servicelib/runtime/serviceapp.hpp>
+
+#include "connector_test.grpc.pb.h"
 
 namespace asio = boost::asio;
 using namespace std::chrono_literals;

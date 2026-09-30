@@ -1,8 +1,13 @@
 #pragma once
-#include <servicelib/runtime/detail/grpc_client_common.hpp>
-
-#include <servicelib/runtime/detail/grpc_context.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <stop_token>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 #include <agrpc/client_rpc.hpp>
 #include <agrpc/default_server_rpc_traits.hpp>
@@ -19,15 +24,9 @@
 #include <boost/system/error_code.hpp>
 #include <grpcpp/support/status.h>
 
-#include <exception>
-#include <functional>
-#include <memory>
-#include <optional>
-#include <stop_token>
-#include <string>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <servicelib/runtime/detail/grpc_client_common.hpp>
+#include <servicelib/runtime/detail/grpc_context.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
 
 namespace servicelib::grpc_transport {
 

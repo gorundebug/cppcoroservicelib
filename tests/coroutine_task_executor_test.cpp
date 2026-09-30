@@ -1,5 +1,7 @@
-#include <gtest/gtest.h>
+#include <thread>
+#include <vector>
 
+#include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
@@ -9,9 +11,6 @@
 #include <boost/asio/use_future.hpp>
 
 #include <servicelib/runtime/detail/task_executor.hpp>
-
-#include <thread>
-#include <vector>
 
 namespace {
 namespace asio = boost::asio;

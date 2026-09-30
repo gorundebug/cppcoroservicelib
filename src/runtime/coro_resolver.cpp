@@ -1,5 +1,5 @@
-#include "servicelib/runtime/detail/coro_resolver.hpp"
-#include "coro_dns_channel.hpp"
+#include <cstring>
+#include <netinet/in.h>
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
@@ -7,8 +7,10 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/system_error.hpp>
-#include <cstring>
-#include <netinet/in.h>
+
+#include "servicelib/runtime/detail/coro_resolver.hpp"
+
+#include "coro_dns_channel.hpp"
 
 namespace servicelib::async {
 namespace {

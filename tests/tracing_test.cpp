@@ -4,7 +4,6 @@
 #include <utility>
 #include <vector>
 
-
 #include <gtest/gtest.h>
 
 #include <servicelib/runtime/context.hpp>
@@ -287,6 +286,7 @@ TEST(Tracing, DetachedChildPreservesExplicitParentAndCanEndLater) {
 
 #include <array>
 #include <type_traits>
+
 #include <servicelib/runtime/caller.hpp>
 
 namespace {

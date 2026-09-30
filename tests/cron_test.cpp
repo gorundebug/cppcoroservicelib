@@ -7,18 +7,17 @@
  */
 
 #include <stdexcept>
-
-#include <gtest/gtest.h>
-
 #include <atomic>
 #include <thread>
 #include <array>
+
+#include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 
-#include "test_async.hpp"
-
 #include <servicelib/datasource/cron/libcron.hpp>
+
+#include "test_async.hpp"
 
 TEST(CronDataSource, AdaptsPortableExpressionsToLibcron) {
   using servicelib::datasource::cron::ToLibcronExpression;

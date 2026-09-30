@@ -1,7 +1,5 @@
 #pragma once
 
-#include <boost/asio/awaitable.hpp>
-
 #include <array>
 #include <chrono>
 #include <concepts>
@@ -16,6 +14,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+
+#include <boost/asio/awaitable.hpp>
 
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/config/config.hpp>

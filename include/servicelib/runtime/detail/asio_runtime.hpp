@@ -1,13 +1,5 @@
 #pragma once
 
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/signal_set.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/thread_pool.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -22,6 +14,14 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/signal_set.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 #if defined(__linux__)
 #include <pthread.h>

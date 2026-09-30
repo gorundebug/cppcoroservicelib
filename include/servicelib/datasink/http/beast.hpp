@@ -6,23 +6,6 @@
  */
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
-
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/co_spawn.hpp>
-
-#include <servicelib/datasink/http/client.hpp>
-#include <servicelib/runtime/common.hpp>
-#include <servicelib/runtime/config/dataconnector_types.hpp>
-#include <servicelib/runtime/config/endpoint_types.hpp>
-#include <servicelib/runtime/datasink.hpp>
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-#include <servicelib/runtime/detail/async_operations.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/environment/tracing/tracing.hpp>
-
 #include <chrono>
 #include <exception>
 #include <future>
@@ -34,6 +17,22 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+
+#include <servicelib/runtime/stream_tracing.hpp>
+#include <servicelib/datasink/http/client.hpp>
+#include <servicelib/runtime/common.hpp>
+#include <servicelib/runtime/config/dataconnector_types.hpp>
+#include <servicelib/runtime/config/endpoint_types.hpp>
+#include <servicelib/runtime/datasink.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/detail/async_operations.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/environment/tracing/tracing.hpp>
 
 namespace servicelib::datasink::http {
 

@@ -1,12 +1,3 @@
-#include <servicelib/runtime/serviceapp.hpp>
-#include <servicelib/runtime/testlog/testlog.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/use_future.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <source_location>
@@ -22,6 +13,16 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/serviceapp.hpp>
+#include <servicelib/runtime/testlog/testlog.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 #include "test_async.hpp"
 

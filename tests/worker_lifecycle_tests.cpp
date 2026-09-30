@@ -1,11 +1,3 @@
-#include <gtest/gtest.h>
-
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
-#include <servicelib/runtime/detail/coro_runtime.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <servicelib/runtime/serviceapp.hpp>
-
 #include <chrono>
 #include <future>
 #include <memory>
@@ -15,6 +7,14 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/detail/coro_runtime.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <servicelib/runtime/serviceapp.hpp>
 
 namespace {
 namespace asio = boost::asio;

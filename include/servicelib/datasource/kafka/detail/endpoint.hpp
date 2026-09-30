@@ -1,9 +1,6 @@
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
 #include <atomic>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/this_coro.hpp>
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
@@ -18,6 +15,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
+
+#include <servicelib/runtime/stream_tracing.hpp>
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/config/dataconnector_types.hpp>
 #include <servicelib/runtime/config/endpoint_types.hpp>
@@ -27,7 +28,6 @@
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/environment/tracing/tracing.hpp>
 #include <servicelib/runtime/store/rotatingmap.hpp>
-
 #include <servicelib/datasource/detail/result_context.hpp>
 
 // Kafka owns its message lifecycle and pending correlations independently

@@ -2,18 +2,15 @@
 #include <chrono>
 #include <future>
 #include <optional>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
 #include <mutex>
 #include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
 
-
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
-
-#include "test_async.hpp"
 
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/pool/delaypool.hpp>
@@ -22,6 +19,8 @@
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
+
+#include "test_async.hpp"
 
 namespace {
 

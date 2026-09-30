@@ -1,6 +1,3 @@
-#include <servicelib/runtime/detail/coro_event_engine.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <gtest/gtest.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -8,6 +5,11 @@
 #include <atomic>
 #include <future>
 #include <thread>
+
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/coro_event_engine.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 
 namespace {
 namespace ee = grpc_event_engine::experimental;

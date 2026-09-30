@@ -1,19 +1,6 @@
 #pragma once
 
 #include <utility>
-
-#include <agrpc/grpc_context.hpp>
-#include <agrpc/grpc_executor.hpp>
-#include <boost/asio/bind_executor.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/signal_set.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/thread_pool.hpp>
-#include <grpcpp/server_builder.h>
-
 #include <atomic>
 #include <algorithm>
 #include <chrono>
@@ -26,6 +13,18 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+
+#include <agrpc/grpc_context.hpp>
+#include <agrpc/grpc_executor.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/signal_set.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <grpcpp/server_builder.h>
 
 #include <servicelib/runtime/detail/asio_runtime.hpp>
 

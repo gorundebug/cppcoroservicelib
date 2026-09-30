@@ -1,19 +1,5 @@
 #pragma once
 
-#include <servicelib/api/serviceapi.hpp>
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-#include <servicelib/runtime/detail/mutex.hpp>
-#include <servicelib/runtime/detail/strand_owned.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/store/joinstore.hpp>
-#include <servicelib/runtime/store/rotatingmap.hpp>
-
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -26,6 +12,20 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+
+#include <servicelib/api/serviceapi.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/detail/mutex.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/store/joinstore.hpp>
+#include <servicelib/runtime/store/rotatingmap.hpp>
 
 namespace servicelib::store {
 

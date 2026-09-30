@@ -1,12 +1,3 @@
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
-
 #include <atomic>
 #include <algorithm>
 #include <chrono>
@@ -16,6 +7,15 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 namespace asio = boost::asio;
 using namespace std::chrono_literals;

@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-
 #include <servicelib/api/serviceapi.hpp>
 #include <servicelib/api/serviceapi_parse.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>

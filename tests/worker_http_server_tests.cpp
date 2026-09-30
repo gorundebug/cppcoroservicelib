@@ -1,9 +1,11 @@
-#include <servicelib/runtime/detail/coro_runtime.hpp>
-#include <servicelib/datasource/http/beast.hpp>
-#include <boost/asio/use_future.hpp>
-#include <gtest/gtest.h>
 #include <future>
 #include <thread>
+
+#include <boost/asio/use_future.hpp>
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/coro_runtime.hpp>
+#include <servicelib/datasource/http/beast.hpp>
 
 namespace {
 namespace asio = boost::asio;

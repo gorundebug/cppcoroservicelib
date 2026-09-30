@@ -1,12 +1,14 @@
 #pragma once
 
-#include <servicelib/runtime/detail/grpc_context.hpp>
-#include <grpcpp/support/status.h>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <stop_token>
 #include <vector>
+
+#include <grpcpp/support/status.h>
+
+#include <servicelib/runtime/detail/grpc_context.hpp>
 
 namespace servicelib::grpc_transport {
 class StatusError final : public std::runtime_error {

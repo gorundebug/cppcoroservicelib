@@ -1,5 +1,3 @@
-#include <servicelib/runtime/serde/serdeimpl.hpp>
-
 #include <any>
 #include <bit>
 #include <cstddef>
@@ -11,6 +9,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <servicelib/runtime/serde/serdeimpl.hpp>
 
 namespace {
 

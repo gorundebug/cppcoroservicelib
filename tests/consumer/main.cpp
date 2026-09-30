@@ -1,10 +1,10 @@
+#include <concepts>
+
 #include <servicelib/runtime/config/config.hpp>
 #include <servicelib/runtime/context.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/transformation/streams.hpp>
 #include <servicelib/datasource/cron/libcron.hpp>
-
-#include <concepts>
 
 static_assert(std::derived_from<servicelib::IRuntimeEnvironment,
                                 servicelib::IServiceEnvironment>);

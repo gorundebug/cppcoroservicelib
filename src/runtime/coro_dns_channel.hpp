@@ -1,15 +1,6 @@
 #pragma once
 
-#include <ares.h>
-#include <servicelib/runtime/detail/strand_owned.hpp>
-#include <fcntl.h>
 #include <unistd.h>
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/bind_executor.hpp>
-#include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -18,6 +9,17 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+#include <ares.h>
+#include <fcntl.h>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+
+#include <servicelib/runtime/detail/strand_owned.hpp>
 
 namespace servicelib::async::dns_detail {
 namespace asio = boost::asio;

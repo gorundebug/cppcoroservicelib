@@ -1,9 +1,11 @@
-#include <servicelib/runtime/detail/coro_runtime.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
-#include <boost/asio/thread_pool.hpp>
-#include <gtest/gtest.h>
 #include <atomic>
 #include <memory>
+
+#include <boost/asio/thread_pool.hpp>
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/coro_runtime.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
 
 namespace {
 using Runtime = servicelib::async::CoroRuntime;

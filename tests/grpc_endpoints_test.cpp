@@ -1,6 +1,3 @@
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_future.hpp>
 #include <atomic>
 #include <exception>
 #include <memory>
@@ -9,16 +6,20 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_future.hpp>
+#include <gtest/gtest.h>
 
 #include <servicelib/datasink/grpc/asio.hpp>
 #include <servicelib/datasource/grpc/asio.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/grpc_streaming.hpp>
-#include <gtest/gtest.h>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
 #include <servicelib/runtime/testtracing/testtracing.hpp>
+
 #include "test_async.hpp"
 #include "test_sink_endpoint_stream.hpp"
 
@@ -2549,12 +2550,14 @@ TEST(GrpcDataSource, CoroutineStreamingSendWaitsForWriteAndPropagatesFailure) {
 
 }  // namespace
 
-#include "connector_test.grpc.pb.h"
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
+
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+
+#include "connector_test.grpc.pb.h"
 
 namespace {
 

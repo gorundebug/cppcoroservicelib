@@ -1,12 +1,14 @@
-#include <gtest/gtest.h>
 #include <atomic>
 #include <future>
 #include <type_traits>
+#include <thread>
+
+#include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
-#include <thread>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+
 #include <servicelib/transformation/streams.hpp>
 
 namespace {

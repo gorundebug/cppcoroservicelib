@@ -1,11 +1,6 @@
 #pragma once
 
 #include <utility>
-
-#include <boost/asio/awaitable.hpp>
-
-#include <servicelib/runtime/detail/http_types.hpp>
-
 #include <functional>
 #include <atomic>
 #include <mutex>
@@ -13,6 +8,10 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#include <boost/asio/awaitable.hpp>
+
+#include <servicelib/runtime/detail/http_types.hpp>
 
 namespace servicelib::http {
 

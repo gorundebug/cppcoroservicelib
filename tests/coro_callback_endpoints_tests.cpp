@@ -1,3 +1,16 @@
+#include <array>
+#include <atomic>
+#include <future>
+#include <map>
+#include <set>
+#include <thread>
+
+#include <boost/asio/use_future.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <grpc/grpc.h>
+#include <grpcpp/grpcpp.h>
+#include <gtest/gtest.h>
+
 #include <servicelib/runtime/detail/coro_event_engine.hpp>
 #include <servicelib/runtime/detail/coro_runtime.hpp>
 #include <servicelib/runtime/detail/worker_io_context.hpp>
@@ -9,19 +22,9 @@
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
-#include <boost/asio/use_future.hpp>
-#include <boost/asio/executor_work_guard.hpp>
-#include <grpc/grpc.h>
-#include <grpcpp/grpcpp.h>
-#include <gtest/gtest.h>
+
 #include "coro_transport.grpc.pb.h"
 #include "test_sink_endpoint_stream.hpp"
-#include <array>
-#include <atomic>
-#include <future>
-#include <map>
-#include <set>
-#include <thread>
 
 namespace {
 namespace asio = boost::asio;

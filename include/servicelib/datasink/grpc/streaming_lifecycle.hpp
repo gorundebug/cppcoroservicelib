@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+
 #include <servicelib/runtime/detail/sync.hpp>
 
 namespace servicelib::datasink::grpc::detail {

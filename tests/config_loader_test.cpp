@@ -1,7 +1,3 @@
-#include <servicelib/api/serviceapi_parse.hpp>
-#include <servicelib/runtime/config/loader.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-
 #include <cassert>
 #include <array>
 #include <chrono>
@@ -10,6 +6,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+
+#include <servicelib/api/serviceapi_parse.hpp>
+#include <servicelib/runtime/config/loader.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 namespace {
 

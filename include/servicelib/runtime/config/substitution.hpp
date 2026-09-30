@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/config/yaml.hpp>
-
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -9,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+
+#include <servicelib/runtime/config/yaml.hpp>
 
 namespace servicelib::config {
 

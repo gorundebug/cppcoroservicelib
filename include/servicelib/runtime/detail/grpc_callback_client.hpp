@@ -2,18 +2,19 @@
 
 // Keep the established status/cancellation contracts while the transport
 // implementation moves from CQ operations to public callback operations.
-#include <servicelib/runtime/detail/grpc_client_common.hpp>
-#include <servicelib/runtime/detail/grpc_callback_stream.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <servicelib/datasink/grpc/common.hpp>
+#include <atomic>
+
 #include <grpc/impl/channel_arg_names.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/support/channel_arguments.h>
-
-#include <atomic>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/this_coro.hpp>
+
+#include <servicelib/runtime/detail/grpc_client_common.hpp>
+#include <servicelib/runtime/detail/grpc_callback_stream.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <servicelib/datasink/grpc/common.hpp>
 
 namespace servicelib::grpc_transport::callback {
 

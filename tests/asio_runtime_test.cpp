@@ -1,8 +1,3 @@
-#include <servicelib/runtime/detail/asio_runtime.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-
-#include <boost/asio/post.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -13,6 +8,11 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+
+#include <boost/asio/post.hpp>
+
+#include <servicelib/runtime/detail/asio_runtime.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 int main() {
   bool rejectedZeroWorkers = false;

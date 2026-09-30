@@ -1,18 +1,3 @@
-#include <servicelib/runtime/detail/coro_event_engine.hpp>
-#include <servicelib/runtime/detail/strand_owned.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-
-#include <boost/asio/basic_socket_acceptor.hpp>
-#include <boost/asio/bind_executor.hpp>
-#include <boost/asio/dispatch.hpp>
-#include <boost/asio/generic/stream_protocol.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ip/v6_only.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-#include <grpc/event_engine/slice_buffer.h>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -25,10 +10,24 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
-
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <boost/asio/basic_socket_acceptor.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/generic/stream_protocol.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ip/v6_only.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <grpc/event_engine/slice_buffer.h>
+
+#include <servicelib/runtime/detail/coro_event_engine.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 
 namespace servicelib::async {
 namespace ee = grpc_event_engine::experimental;

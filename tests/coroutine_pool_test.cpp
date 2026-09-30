@@ -1,14 +1,3 @@
-#include <gtest/gtest.h>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/use_future.hpp>
-#include <servicelib/runtime/pool/delaypool.hpp>
-#include <servicelib/runtime/pool/taskpool.hpp>
-#include <servicelib/runtime/pool/prioritytaskpool.hpp>
-#include <servicelib/runtime/testlog/testlog.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 #include <chrono>
 #include <memory>
 #include <stop_token>
@@ -17,6 +6,19 @@
 #include <array>
 #include <atomic>
 #include <thread>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/pool/delaypool.hpp>
+#include <servicelib/runtime/pool/taskpool.hpp>
+#include <servicelib/runtime/pool/prioritytaskpool.hpp>
+#include <servicelib/runtime/testlog/testlog.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 namespace {
 namespace asio = boost::asio;

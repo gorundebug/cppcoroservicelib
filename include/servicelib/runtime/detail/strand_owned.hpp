@@ -1,8 +1,9 @@
 #pragma once
 
-#include <boost/asio/post.hpp>
 #include <memory>
 #include <utility>
+
+#include <boost/asio/post.hpp>
 
 namespace servicelib::detail {
 

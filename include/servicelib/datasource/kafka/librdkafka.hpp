@@ -1,9 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
-#include <servicelib/runtime/detail/blocking.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -18,6 +15,11 @@
 #include <string>
 #include <thread>
 #include <utility>
+
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/detail/blocking.hpp>
 
 #if __has_include(<librdkafka/rdkafka.h>)
 #include <librdkafka/rdkafka.h>

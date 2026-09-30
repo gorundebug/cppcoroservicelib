@@ -1,27 +1,3 @@
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/connect.hpp>
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/write.hpp>
-#include <boost/asio/use_future.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
-
-#include <gtest/gtest.h>
-
-#include <servicelib/datasource/http/beast.hpp>
-#include <servicelib/datasink/http/beast.hpp>
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/testlog/testlog.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-#include <servicelib/runtime/testtracing/testtracing.hpp>
-#include <servicelib/transformation/streams.hpp>
-
-#include "test_sink_endpoint_stream.hpp"
-
 #include <chrono>
 #include <atomic>
 #include <algorithm>
@@ -40,6 +16,29 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/connect.hpp>
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/write.hpp>
+#include <boost/asio/use_future.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <gtest/gtest.h>
+
+#include <servicelib/datasource/http/beast.hpp>
+#include <servicelib/datasink/http/beast.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/testlog/testlog.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
+#include <servicelib/runtime/testtracing/testtracing.hpp>
+#include <servicelib/transformation/streams.hpp>
+
+#include "test_sink_endpoint_stream.hpp"
 
 namespace {
 

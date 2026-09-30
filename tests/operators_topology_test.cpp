@@ -1,9 +1,4 @@
-#include <gtest/gtest.h>
-
 #include <chrono>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/use_future.hpp>
 #include <utility>
 #include <array>
 #include <functional>
@@ -11,6 +6,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/use_future.hpp>
 
 #include <servicelib/transformation/streams.hpp>
 

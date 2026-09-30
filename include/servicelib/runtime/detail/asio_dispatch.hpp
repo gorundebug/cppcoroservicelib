@@ -1,16 +1,16 @@
 #pragma once
 
-#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <exception>
+#include <mutex>
+#include <stdexcept>
+#include <utility>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/post.hpp>
 
-#include <exception>
-#include <mutex>
-#include <stdexcept>
-#include <utility>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 
 namespace servicelib::detail {
 

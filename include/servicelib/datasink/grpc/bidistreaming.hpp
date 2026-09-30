@@ -4,13 +4,12 @@
 #include <deque>
 #include <mutex>
 #include <optional>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-#include <servicelib/datasink/grpc/streaming_lifecycle.hpp>
-
 #include <type_traits>
 
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 
+#include <servicelib/datasink/grpc/streaming_lifecycle.hpp>
 #include <servicelib/datasink/grpc/common.hpp>
 #include <servicelib/runtime/store/rotatingmap.hpp>
 #include <servicelib/runtime/detail/sync.hpp>

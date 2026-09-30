@@ -1,4 +1,10 @@
-#include "servicelib/runtime/detail/coro_event_engine.hpp"
+#include <netinet/in.h>
+#include <chrono>
+#include <memory>
+#include <string>
+#include <deque>
+#include <limits>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <boost/asio/ip/udp.hpp>
@@ -9,14 +15,8 @@
 #include <boost/asio/local/stream_protocol.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/read.hpp>
-#include <netinet/in.h>
 
-#include <chrono>
-#include <memory>
-#include <string>
-#include <deque>
-#include <limits>
-#include <vector>
+#include "servicelib/runtime/detail/coro_event_engine.hpp"
 
 namespace {
 using Engine = servicelib::async::CoroEventEngine;

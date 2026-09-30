@@ -1,9 +1,9 @@
 #pragma once
 
 #include <functional>
+
 #include <servicelib/runtime/detail/mutex.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
-
 #include <servicelib/datasink/grpc/common.hpp>
 
 namespace servicelib::datasink::grpc {

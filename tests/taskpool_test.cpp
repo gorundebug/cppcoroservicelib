@@ -1,14 +1,3 @@
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
-
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-#include <servicelib/runtime/pool/taskpool.hpp>
-#include <servicelib/runtime/testlog/testlog.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -19,6 +8,17 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
+#include <servicelib/runtime/pool/taskpool.hpp>
+#include <servicelib/runtime/testlog/testlog.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
 
 namespace {
 

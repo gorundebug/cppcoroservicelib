@@ -1,25 +1,3 @@
-#include <gtest/gtest.h>
-
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_future.hpp>
-#include "servicelib/runtime/detail/blocking.hpp"
-#include "servicelib/runtime/detail/initialization.hpp"
-#include "servicelib/runtime/detail/sync.hpp"
-
-#include <servicelib/datasink/localsink/custom.hpp>
-#include <servicelib/datasource/localsource/custom.hpp>
-#include <servicelib/datasource/kafka/detail/endpoint.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/testlog/testlog.hpp>
-#include <servicelib/runtime/testmetrics/testmetrics.hpp>
-#include <servicelib/runtime/testtracing/testtracing.hpp>
-
-#include "test_sink_endpoint_stream.hpp"
-
-#include "test_async.hpp"
-
 #include <atomic>
 #include <exception>
 #include <future>
@@ -29,6 +7,26 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_future.hpp>
+
+#include "servicelib/runtime/detail/blocking.hpp"
+#include "servicelib/runtime/detail/initialization.hpp"
+#include "servicelib/runtime/detail/sync.hpp"
+#include <servicelib/datasink/localsink/custom.hpp>
+#include <servicelib/datasource/localsource/custom.hpp>
+#include <servicelib/datasource/kafka/detail/endpoint.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/testlog/testlog.hpp>
+#include <servicelib/runtime/testmetrics/testmetrics.hpp>
+#include <servicelib/runtime/testtracing/testtracing.hpp>
+
+#include "test_sink_endpoint_stream.hpp"
+#include "test_async.hpp"
 
 namespace {
 

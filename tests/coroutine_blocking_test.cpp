@@ -1,3 +1,6 @@
+#include <future>
+#include <thread>
+
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/thread_pool.hpp>
@@ -5,9 +8,6 @@
 #include <gtest/gtest.h>
 
 #include <servicelib/runtime/detail/blocking.hpp>
-
-#include <future>
-#include <thread>
 
 namespace {
 namespace asio = boost::asio;

@@ -1,12 +1,13 @@
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <servicelib/datasink/http/client.hpp>
-#include <servicelib/datasource/http/beast.hpp>
-#include <boost/asio/use_future.hpp>
-#include <gtest/gtest.h>
-
 #include <array>
 #include <future>
 #include <thread>
+
+#include <boost/asio/use_future.hpp>
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/worker_io_context.hpp>
+#include <servicelib/datasink/http/client.hpp>
+#include <servicelib/datasource/http/beast.hpp>
 
 namespace {
 namespace asio = boost::asio;

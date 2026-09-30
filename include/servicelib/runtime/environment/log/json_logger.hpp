@@ -1,13 +1,13 @@
 #pragma once
 
-#include <servicelib/runtime/environment/log/log.hpp>
-
 #include <chrono>
 #include <iomanip>
 #include <mutex>
 #include <ostream>
 #include <sstream>
 #include <string>
+
+#include <servicelib/runtime/environment/log/log.hpp>
 
 namespace servicelib::log {
 

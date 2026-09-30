@@ -1,13 +1,15 @@
+#include <chrono>
+#include <future>
+#include <stdexcept>
+
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
+
 #include <servicelib/runtime/detail/initialization.hpp>
-#include <chrono>
-#include <future>
-#include <stdexcept>
 
 namespace {
 namespace asio = boost::asio;

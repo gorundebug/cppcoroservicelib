@@ -10,8 +10,6 @@
  */
 #pragma once
 
-#include <boost/asio/awaitable.hpp>
-
 #include <any>
 #include <chrono>
 #include <cstddef>
@@ -19,6 +17,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/awaitable.hpp>
 
 #include <servicelib/runtime/config/stream_types.hpp>
 #include <servicelib/runtime/store/storage.hpp>

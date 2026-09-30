@@ -10,11 +10,12 @@
 #include <stop_token>
 #include <vector>
 
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/cancellation_state.hpp>
+
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/mutex.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/cancellation_state.hpp>
 
 namespace servicelib {
 namespace detail {

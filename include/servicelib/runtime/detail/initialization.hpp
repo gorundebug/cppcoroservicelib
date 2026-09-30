@@ -1,15 +1,16 @@
 #pragma once
 
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/this_coro.hpp>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <stop_token>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
 
 #include <servicelib/runtime/detail/sync.hpp>
 

@@ -1,9 +1,10 @@
-#include <servicelib/runtime/detail/sync.hpp>
-#include <servicelib/runtime/detail/mutex.hpp>
-#include <servicelib/runtime/detail/blocking.hpp>
-#include <servicelib/runtime/detail/initialization.hpp>
-#include <servicelib/runtime/environment.hpp>
-#include <servicelib/datasource/detail/result_context.hpp>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <vector>
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/executor_work_guard.hpp>
@@ -15,13 +16,12 @@
 #include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <future>
-#include <memory>
-#include <optional>
-#include <thread>
-#include <vector>
+#include <servicelib/runtime/detail/sync.hpp>
+#include <servicelib/runtime/detail/mutex.hpp>
+#include <servicelib/runtime/detail/blocking.hpp>
+#include <servicelib/runtime/detail/initialization.hpp>
+#include <servicelib/runtime/environment.hpp>
+#include <servicelib/datasource/detail/result_context.hpp>
 
 namespace {
 using boost::asio::awaitable;

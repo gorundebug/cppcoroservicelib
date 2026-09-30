@@ -12,7 +12,6 @@
 #include <string>
 #include <utility>
 
-
 #include <servicelib/api/serviceapi.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>
 

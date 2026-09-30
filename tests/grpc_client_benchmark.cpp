@@ -1,14 +1,3 @@
-#include "connector_test.grpc.pb.h"
-
-#include <servicelib/runtime/detail/grpc_client.hpp>
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
-#include <servicelib/runtime/detail/grpc_transport.hpp>
-
-#include <agrpc/client_rpc.hpp>
-#include <boost/asio/bind_executor.hpp>
-#include <boost/asio/post.hpp>
-#include <grpcpp/server_builder.h>
-
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -23,6 +12,17 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <agrpc/client_rpc.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/post.hpp>
+#include <grpcpp/server_builder.h>
+
+#include <servicelib/runtime/detail/grpc_client.hpp>
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+#include <servicelib/runtime/detail/grpc_transport.hpp>
+
+#include "connector_test.grpc.pb.h"
 
 namespace asio = boost::asio;
 using Clock = std::chrono::steady_clock;

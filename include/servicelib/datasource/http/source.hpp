@@ -1,17 +1,6 @@
 #pragma once
 
 #include <utility>
-
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/use_awaitable.hpp>
-
-#include <servicelib/datasource/http/router.hpp>
-#include <servicelib/runtime/caller.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -24,6 +13,16 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
+#include <servicelib/datasource/http/router.hpp>
+#include <servicelib/runtime/caller.hpp>
 
 namespace servicelib::http {
 

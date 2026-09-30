@@ -1,8 +1,12 @@
 #pragma once
 
-#include <servicelib/runtime/detail/grpc_context.hpp>
-#include <servicelib/runtime/detail/mutex.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <stop_token>
+#include <utility>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -11,13 +15,9 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <grpcpp/support/server_callback.h>
 
-#include <exception>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <stdexcept>
-#include <stop_token>
-#include <utility>
+#include <servicelib/runtime/detail/grpc_context.hpp>
+#include <servicelib/runtime/detail/mutex.hpp>
+#include <servicelib/runtime/detail/sync.hpp>
 
 namespace servicelib::grpc_transport {
 namespace callback_detail {

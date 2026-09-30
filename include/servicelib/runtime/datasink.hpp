@@ -1,7 +1,5 @@
 #pragma once
 
-#include <boost/asio/awaitable.hpp>
-
 #include <chrono>
 #include <cstddef>
 #include <concepts>
@@ -13,6 +11,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <boost/asio/awaitable.hpp>
 
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/environment/log/log.hpp>

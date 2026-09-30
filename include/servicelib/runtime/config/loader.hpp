@@ -1,12 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/config/config.hpp>
-#include <servicelib/runtime/config/substitution.hpp>
-#include <servicelib/runtime/config/yaml.hpp>
-#include <servicelib/runtime/config/yaml_value.hpp>
-#include <servicelib/runtime/environment/log/log.hpp>
-#include <servicelib/runtime/environment/metrics/metrics.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -20,6 +13,13 @@
 #include <string>
 #include <thread>
 #include <utility>
+
+#include <servicelib/runtime/config/config.hpp>
+#include <servicelib/runtime/config/substitution.hpp>
+#include <servicelib/runtime/config/yaml.hpp>
+#include <servicelib/runtime/config/yaml_value.hpp>
+#include <servicelib/runtime/environment/log/log.hpp>
+#include <servicelib/runtime/environment/metrics/metrics.hpp>
 
 namespace servicelib::config {
 

@@ -4,11 +4,6 @@
  */
 #pragma once
 
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -22,13 +17,18 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/cancellation_state.hpp>
+
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/task_executor.hpp>
 #include <servicelib/runtime/detail/strand_owned.hpp>
 #include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/cancellation_state.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/pool/pool.hpp>
 

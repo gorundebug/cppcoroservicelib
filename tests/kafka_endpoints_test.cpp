@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 
@@ -11,7 +10,6 @@
 #include <servicelib/runtime/testtracing/testtracing.hpp>
 
 #include "test_sink_endpoint_stream.hpp"
-
 #include "test_async.hpp"
 
 #if __has_include(<librdkafka/rdkafka_mock.h>)

@@ -1,16 +1,19 @@
-#include <servicelib/runtime/detail/coro_runtime.hpp>
-#include <servicelib/runtime/detail/grpc_callback_client.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/use_future.hpp>
-#include <grpcpp/grpcpp.h>
-#include <gtest/gtest.h>
-#include "coro_transport.grpc.pb.h"
 #include <array>
 #include <atomic>
 #include <condition_variable>
 #include <future>
 #include <mutex>
 #include <thread>
+
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/use_future.hpp>
+#include <grpcpp/grpcpp.h>
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/coro_runtime.hpp>
+#include <servicelib/runtime/detail/grpc_callback_client.hpp>
+
+#include "coro_transport.grpc.pb.h"
 
 namespace {
 namespace asio = boost::asio;

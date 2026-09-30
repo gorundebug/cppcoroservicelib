@@ -1,18 +1,6 @@
-#include "servicelib/runtime/detail/coro_event_engine.hpp"
-#include "servicelib/runtime/detail/worker_io_context.hpp"
-
-#include "coro_dns_channel.hpp"
 #include <arpa/nameser.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <unistd.h>
-
-#include <boost/asio/bind_executor.hpp>
-#include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -21,6 +9,18 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <fcntl.h>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+
+#include "servicelib/runtime/detail/coro_event_engine.hpp"
+#include "servicelib/runtime/detail/worker_io_context.hpp"
+
+#include "coro_dns_channel.hpp"
 
 namespace servicelib::async {
 namespace {

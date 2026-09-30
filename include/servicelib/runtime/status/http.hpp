@@ -1,13 +1,13 @@
 #pragma once
 
-#include <servicelib/datasource/http/router.hpp>
-#include <servicelib/runtime/status/status.hpp>
-#include <servicelib/runtime/status/web.generated.hpp>
-
 #include <functional>
 #include <string>
 #include <unordered_set>
 #include <utility>
+
+#include <servicelib/datasource/http/router.hpp>
+#include <servicelib/runtime/status/status.hpp>
+#include <servicelib/runtime/status/web.generated.hpp>
 
 namespace servicelib::http {
 

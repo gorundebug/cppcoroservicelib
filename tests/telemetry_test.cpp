@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-
 #include <gtest/gtest.h>
 
 #include <servicelib/runtime/base.hpp>

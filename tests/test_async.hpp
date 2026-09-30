@@ -1,11 +1,5 @@
 #pragma once
 
-#include <boost/asio/executor_work_guard.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/thread_pool.hpp>
-
-#include <servicelib/runtime/detail/asio_dispatch.hpp>
-
 #include <chrono>
 #include <condition_variable>
 #include <future>
@@ -13,6 +7,12 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/thread_pool.hpp>
+
+#include <servicelib/runtime/detail/asio_dispatch.hpp>
 
 namespace test_async {
 

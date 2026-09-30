@@ -1,9 +1,6 @@
 #include <any>
 #include <barrier>
 #include <thread>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
-#include <servicelib/runtime/detail/sync.hpp>
 #include <atomic>
 #include <chrono>
 #include <stop_token>
@@ -11,16 +8,18 @@
 #include <utility>
 #include <vector>
 
-
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
 
-#include "test_async.hpp"
-
+#include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/environment/environment.hpp>
 #include <servicelib/runtime/store/hashmap.hpp>
 #include <servicelib/runtime/store/rotatingmap.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
+
+#include "test_async.hpp"
 
 namespace {
 

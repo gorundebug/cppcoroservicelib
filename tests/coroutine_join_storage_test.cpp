@@ -1,5 +1,9 @@
-#include <gtest/gtest.h>
+#include <any>
+#include <memory>
+#include <string>
+#include <vector>
 
+#include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -10,11 +14,6 @@
 #include <servicelib/runtime/store/hashmap.hpp>
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
-
-#include <any>
-#include <memory>
-#include <string>
-#include <vector>
 
 namespace {
 namespace asio = boost::asio;

@@ -1,14 +1,3 @@
-#include "servicelib/runtime/detail/coro_event_engine.hpp"
-#include "servicelib/runtime/detail/grpc_callback_server.hpp"
-#include "servicelib/runtime/detail/grpc_callback_client.hpp"
-#include <boost/asio/use_future.hpp>
-#include "coro_transport.grpc.pb.h"
-
-#include <grpc/grpc.h>
-#include <grpcpp/grpcpp.h>
-#include <gtest/gtest.h>
-#include <boost/asio/executor_work_guard.hpp>
-
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -20,6 +9,18 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <boost/asio/use_future.hpp>
+#include <grpc/grpc.h>
+#include <grpcpp/grpcpp.h>
+#include <gtest/gtest.h>
+#include <boost/asio/executor_work_guard.hpp>
+
+#include "servicelib/runtime/detail/coro_event_engine.hpp"
+#include "servicelib/runtime/detail/grpc_callback_server.hpp"
+#include "servicelib/runtime/detail/grpc_callback_client.hpp"
+
+#include "coro_transport.grpc.pb.h"
 
 namespace {
 namespace ee = grpc_event_engine::experimental;

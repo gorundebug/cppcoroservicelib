@@ -1,16 +1,16 @@
 #pragma once
 
-#include <servicelib/runtime/detail/http_types.hpp>
-#include <servicelib/runtime/context.hpp>
-
-#include <grpcpp/client_context.h>
-#include <grpcpp/server_context.h>
-
 #include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cctype>
 #include <string>
+
+#include <grpcpp/client_context.h>
+#include <grpcpp/server_context.h>
+
+#include <servicelib/runtime/detail/http_types.hpp>
+#include <servicelib/runtime/context.hpp>
 
 namespace servicelib::grpc_transport {
 

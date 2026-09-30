@@ -1,15 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/detail/task_executor.hpp>
-#include <servicelib/runtime/detail/strand_owned.hpp>
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/cancellation_state.hpp>
-
-#include <boost/asio/post.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -28,6 +18,15 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+
+#include <servicelib/runtime/detail/task_executor.hpp>
+#include <servicelib/runtime/detail/strand_owned.hpp>
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 #include <servicelib/runtime/detail/asio_dispatch.hpp>
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/environment/environment.hpp>

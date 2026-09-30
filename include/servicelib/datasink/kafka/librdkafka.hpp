@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/stream_tracing.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -17,11 +15,15 @@
 #include <unordered_map>
 #include <utility>
 
+#include <servicelib/runtime/stream_tracing.hpp>
+
 #if __has_include(<librdkafka/rdkafka.h>)
 #include <librdkafka/rdkafka.h>
 #else
 #include <rdkafka.h>
 #endif
+
+#include <boost/asio/co_spawn.hpp>
 
 #include <servicelib/runtime/common.hpp>
 #include <servicelib/runtime/config/dataconnector_types.hpp>
@@ -31,7 +33,6 @@
 #include <servicelib/runtime/detail/sync.hpp>
 #include <servicelib/runtime/detail/async_operations.hpp>
 #include <servicelib/runtime/detail/blocking.hpp>
-#include <boost/asio/co_spawn.hpp>
 #include <servicelib/runtime/detail/kafka_context.hpp>
 #include <servicelib/runtime/detail/kafka_admin.hpp>
 #include <servicelib/runtime/environment/environment.hpp>

@@ -1,11 +1,12 @@
-#include <servicelib/runtime/detail/worker_io_context.hpp>
-#include <gtest/gtest.h>
-
 #include <array>
 #include <chrono>
 #include <filesystem>
 #include <future>
 #include <thread>
+
+#include <gtest/gtest.h>
+
+#include <servicelib/runtime/detail/worker_io_context.hpp>
 
 namespace {
 using Worker = servicelib::async::WorkerIoContext;

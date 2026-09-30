@@ -1,7 +1,5 @@
 #pragma once
 
-#include <servicelib/runtime/context.hpp>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -13,12 +11,14 @@
 #include <map>
 #include <memory>
 #include <mutex>
-
-#include <boost/beast/http/fields.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <boost/beast/http/fields.hpp>
+
+#include <servicelib/runtime/context.hpp>
 
 namespace servicelib::http {
 

@@ -1,12 +1,13 @@
+import os
+import sys
+from pathlib import Path
+import re
+
 from conan import ConanFile
 from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 from conan.tools.files import copy
 from conan.errors import ConanInvalidConfiguration
-import os
-import sys
-from pathlib import Path
-import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "conan"))
 from dependencies_generated import VERSIONS

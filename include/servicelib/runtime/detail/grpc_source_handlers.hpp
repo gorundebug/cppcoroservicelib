@@ -1,12 +1,14 @@
 #pragma once
-#include <servicelib/datasource/grpc/common.hpp>
-#include <servicelib/runtime/detail/grpc_context.hpp>
-#include <boost/asio/use_awaitable.hpp>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <utility>
+
+#include <boost/asio/use_awaitable.hpp>
+
+#include <servicelib/datasource/grpc/common.hpp>
+#include <servicelib/runtime/detail/grpc_context.hpp>
 
 namespace servicelib::grpc_transport {
 template <typename Endpoint, typename RPC>

@@ -1,11 +1,3 @@
-#include "connector_test.grpc.pb.h"
-#include <servicelib/datasource/http/beast.hpp>
-#include <servicelib/runtime/detail/grpc_client.hpp>
-#include <servicelib/runtime/detail/grpc_runtime.hpp>
-#include <servicelib/runtime/detail/grpc_transport.hpp>
-#include <servicelib/runtime/environment/environment.hpp>
-#include <servicelib/runtime/pool/delaypool.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -13,6 +5,15 @@
 #include <memory>
 #include <optional>
 #include <thread>
+
+#include <servicelib/datasource/http/beast.hpp>
+#include <servicelib/runtime/detail/grpc_client.hpp>
+#include <servicelib/runtime/detail/grpc_runtime.hpp>
+#include <servicelib/runtime/detail/grpc_transport.hpp>
+#include <servicelib/runtime/environment/environment.hpp>
+#include <servicelib/runtime/pool/delaypool.hpp>
+
+#include "connector_test.grpc.pb.h"
 
 namespace asio = boost::asio;
 namespace http = servicelib::http;

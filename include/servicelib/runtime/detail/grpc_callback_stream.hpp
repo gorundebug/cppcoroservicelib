@@ -1,11 +1,12 @@
 #pragma once
 
-#include <servicelib/runtime/detail/grpc_client_common.hpp>
-#include <servicelib/runtime/detail/grpc_client_writer.hpp>
-#include <servicelib/datasink/grpc/common.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <grpcpp/support/client_callback.h>
+
+#include <servicelib/runtime/detail/grpc_client_common.hpp>
+#include <servicelib/runtime/detail/grpc_client_writer.hpp>
+#include <servicelib/datasink/grpc/common.hpp>
 
 namespace servicelib::grpc_transport::callback::detail {
 

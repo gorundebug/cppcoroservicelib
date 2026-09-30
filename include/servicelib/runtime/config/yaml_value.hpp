@@ -1,9 +1,9 @@
 #pragma once
 
-#include <yaml-cpp/yaml.h>
-
 #include <string>
 #include <utility>
+
+#include <yaml-cpp/yaml.h>
 
 namespace servicelib::config {
 
