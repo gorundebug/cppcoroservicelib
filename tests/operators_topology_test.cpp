@@ -283,6 +283,30 @@ class TopologyApp final
     ASSERT_NE(negativeSerde, nullptr);
     EXPECT_EQ(negativeSerde->Deserialize(negativeSerde->Serialize(-456)), -456);
     EXPECT_NE(negativeSerde, caseStream.getSerde());
+    EXPECT_EQ(caseStream.whenIndex("positive"), 0U);
+    EXPECT_EQ(caseStream.whenIndex("negative"), 1U);
+#ifdef NDEBUG
+    EXPECT_THROW(caseStream.whenIndex("missing"), servicelib::StreamException);
+    EXPECT_THROW(caseStream.whenIndex(""), servicelib::StreamException);
+#else
+    EXPECT_DEATH(caseStream.whenIndex("missing"), "StreamException");
+    EXPECT_DEATH(caseStream.whenIndex(""), "StreamException");
+#endif
+    negativeConfig.name = "positive";
+    caseStream.template get<1>().configure(negativeConfig, nullptr, this);
+#ifdef NDEBUG
+    EXPECT_THROW(caseStream.whenIndex("positive"), servicelib::StreamException);
+#else
+    EXPECT_DEATH(caseStream.whenIndex("positive"), "StreamException");
+#endif
+    positiveConfig.name = "negative";
+    caseStream.template get<0>().configure(positiveConfig, nullptr, this);
+    EXPECT_EQ(caseStream.whenIndex("positive"), 1U);
+    EXPECT_EQ(caseStream.whenIndex("negative"), 0U);
+    positiveConfig.name = "positive";
+    negativeConfig.name = "negative";
+    caseStream.template get<0>().configure(positiveConfig, nullptr, this);
+    caseStream.template get<1>().configure(negativeConfig, nullptr, this);
     caseStream.template get<0>().sink(
         sinkConfig(14, "positive-output"), servicelib::StreamType<int>{},
         servicelib::StreamFunction(RecordValue{&positive_}));
