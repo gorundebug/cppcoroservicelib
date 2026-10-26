@@ -421,7 +421,7 @@ void CheckTransportDrainWaitersAndRestart() {
       auto promise = std::make_shared<std::promise<void>>();
       stopped.push_back(promise->get_future());
       servicelib::detail::ParallelExecutorRegistry::Post([&operations, promise]() -> asio::awaitable<void> {
-        co_await operations.stopAndWait();
+        co_await operations.stopAndWait(servicelib::Context{});
         promise->set_value();
       
     co_return;
@@ -433,7 +433,7 @@ void CheckTransportDrainWaitersAndRestart() {
     auto nativeStoppedFuture = nativeStopped.get_future();
     std::thread nativeWaiter([&] {
       nativeStarted.set_value();
-      RunGrpc(operations.stopAndWait());
+      RunGrpc(operations.stopAndWait(servicelib::Context{}));
       nativeStopped.set_value();
     });
     auto pulse = std::make_shared<std::promise<void>>();
@@ -458,7 +458,7 @@ void CheckTransportDrainWaitersAndRestart() {
     nativeStoppedFuture.get();
     Require(progressed && nativeStartedInTime, "transport draining blocked executor progress");
     Require(admissionClosed && !stoppedEarly, "transport drain admission or lifetime differs");
-    RunGrpc(operations.stopAndWait());
+    RunGrpc(operations.stopAndWait(servicelib::Context{}));
   }
 }
 

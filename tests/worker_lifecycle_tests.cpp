@@ -115,14 +115,16 @@ TEST(WorkerLifecycle, DeadlineRetainsPendingComponentWithoutBlockingEitherOwner)
   const auto status = stopped.wait_for(2s);
   EXPECT_EQ(status, std::future_status::ready);
   if (status == std::future_status::ready) {
-    stopped.get();
+    EXPECT_THROW(stopped.get(), std::runtime_error);
     EXPECT_TRUE(lifecycle.hasPendingShutdown());
   }
   EXPECT_FALSE(retained.expired());
   ExpectBothOwnersProgress(runtime);
   release.Release();
-  if (status != std::future_status::ready) stopped.get();
-  asio::co_spawn(runtime.executor(), lifecycle.finishShutdown(), asio::use_future).get();
+  if (status != std::future_status::ready) {
+    EXPECT_THROW(stopped.get(), std::runtime_error);
+  }
+  asio::co_spawn(runtime.executor(), lifecycle.finishShutdown(servicelib::Context{}), asio::use_future).get();
   EXPECT_FALSE(lifecycle.hasPendingShutdown());
   EXPECT_TRUE(retained.expired());
   EXPECT_EQ(events->Snapshot(),
@@ -131,7 +133,7 @@ TEST(WorkerLifecycle, DeadlineRetainsPendingComponentWithoutBlockingEitherOwner)
   runtime.join();
 }
 
-TEST(WorkerLifecycle, FailedStartAwaitsReverseCleanupWithoutPinningWorkers) {
+TEST(WorkerLifecycle, FailedStartUsesDependencySafeCleanupWithoutPinningWorkers) {
   CoroRuntime::Options options;
   options.workers = 2;
   options.perWorkerIo = true;
@@ -156,8 +158,8 @@ TEST(WorkerLifecycle, FailedStartAwaitsReverseCleanupWithoutPinningWorkers) {
   release.Release();
   EXPECT_THROW(started.get(), std::runtime_error);
   EXPECT_EQ(events->Snapshot(), (std::vector<std::string>{
-      "start:storage", "start:sink", "start:source", "stop:sink", "done:sink",
-      "stop:storage", "done:storage"}));
+      "start:storage", "start:sink", "start:source", "stop:source", "done:source",
+      "stop:storage", "done:storage", "stop:sink", "done:sink"}));
   runtime.stop();
   runtime.join();
 }

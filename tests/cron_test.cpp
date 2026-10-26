@@ -82,3 +82,42 @@ TEST(CronDataSource, CorrelatedWaitDoesNotOccupyExecutorWorkers) {
   EXPECT_TRUE(allFinished.WaitForEvent());
   EXPECT_TRUE(delivered.WaitForEvent());
 }
+
+TEST(CronDataSource, OccurrencePreservesOwnerDeadlineSamplingAndCancellation) {
+  std::stop_source stop;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  const auto owner = servicelib::Context{}.withStopToken(stop.get_token())
+                         .withDeadline(deadline).withSampling(true);
+  auto context = servicelib::datasource::cron::detail::OccurrenceContext(owner)
+                     .withStreamId("occurrence");
+  EXPECT_EQ(context.deadline(), owner.deadline());
+  EXPECT_TRUE(context.samplingEnabled());
+  EXPECT_EQ(context.streamId(), "occurrence");
+  EXPECT_FALSE(context.cancelled());
+  bool notified = false;
+  std::stop_callback callback{context.stopToken(), [&] { notified = true; }};
+  stop.request_stop();
+  EXPECT_TRUE(context.cancelled());
+  EXPECT_TRUE(notified);
+}
+
+TEST(CronDataSource, OccurrencePreservesEveryExternalCancellation) {
+  for (int cancelled = 0; cancelled < 2; ++cancelled) {
+    std::stop_source first, second;
+    const auto owner = servicelib::Context{}
+                           .withExternalCancellation(first.get_token())
+                           .withExternalCancellation(second.get_token());
+    const auto context = servicelib::datasource::cron::detail::OccurrenceContext(owner);
+    EXPECT_EQ(context.externalStopTokens().size(), 2U);
+    EXPECT_FALSE(context.cancelled());
+    (cancelled == 0 ? first : second).request_stop();
+    EXPECT_TRUE(context.cancelled());
+  }
+}
+
+TEST(CronDataSource, OccurrenceDoesNotExtendExpiredOwnerDeadline) {
+  const auto owner = servicelib::Context{}.withDeadline(std::chrono::steady_clock::now());
+  const auto context = servicelib::datasource::cron::detail::OccurrenceContext(owner);
+  EXPECT_TRUE(context.cancelled());
+  EXPECT_EQ(context.deadline(), owner.deadline());
+}

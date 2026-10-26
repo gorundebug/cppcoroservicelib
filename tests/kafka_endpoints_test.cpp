@@ -23,6 +23,7 @@
 #include <condition_variable>
 #include <exception>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -377,7 +378,7 @@ TEST(KafkaContext, RestoresCanonicalPropagationHeaders) {
        "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00"},
       {"tracestate", "vendor=value"},
       {"baggage", "tenant=test"}};
-  const auto context = servicelib::detail::ContextFromKafkaHeaders(headers);
+  const auto context = servicelib::detail::ContextFromKafkaHeaders(servicelib::MessageContext{}, headers);
   EXPECT_EQ(context.streamId(), "stream-42");
   EXPECT_FALSE(context.samplingEnabled());
   ASSERT_TRUE(context.trace().isValid());
@@ -976,6 +977,133 @@ TEST(KafkaDataSource, StopCancelsPendingInlineMessageBeforeConsumerStop) {
   ASSERT_TRUE(entered.WaitForEvent());
   runKafka(endpoint->stop(servicelib::Context{}));
   EXPECT_TRUE(ended.WaitForEvent());
+}
+
+struct DelayedKafkaSourceProbe final {
+  test_async::Event entered;
+  servicelib::detail::SingleUseEvent release;
+  std::atomic<int> ended{0};
+  std::optional<servicelib::MessageContext> messageContext;
+};
+
+class DelayedKafkaConsumer final
+    : public servicelib::datasource::kafka::ConsumerClient {
+ public:
+  void start(Callback callback) override {
+    callback(servicelib::datasource::kafka::ConsumerMessage{
+        "key", "delayed", "events", 0, 1});
+    returned.store(true, std::memory_order_release);
+  }
+  void stop() noexcept override {
+    stopCalls.fetch_add(1, std::memory_order_relaxed);
+  }
+  std::atomic<bool> returned{false};
+  std::atomic<int> stopCalls{0};
+};
+
+struct DelayedKafkaSourceHandler final {
+  using State = int;
+  std::shared_ptr<DelayedKafkaSourceProbe> probe;
+  std::shared_ptr<int> lifetime;
+
+  int concurrency(auto&) { return 1; }
+  boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
+      servicelib::MessageContext context, auto&) {
+    co_return servicelib::BeginResult<State>{std::move(context), 0};
+  }
+  boost::asio::awaitable<void> consumeMessage(
+      servicelib::MessageContext context, auto&, State&,
+      const servicelib::datasource::kafka::ConsumerMessage&, auto) {
+    probe->messageContext = std::move(context);
+    probe->entered.Send();
+    // Deliberately uncooperative user code: a shutdown deadline must bound
+    // the caller's wait without destroying this suspended coroutine.
+    co_await probe->release.AsyncWait();
+  }
+  boost::asio::awaitable<std::string> getMessageId(
+      servicelib::MessageContext, auto&, State&, const int&) {
+    co_return "delayed";
+  }
+  boost::asio::awaitable<void> endRequest(
+      servicelib::MessageContext, auto&, std::exception_ptr error, State&) {
+    EXPECT_FALSE(error);
+    probe->ended.fetch_add(1, std::memory_order_release);
+    co_return;
+  }
+};
+
+TEST(KafkaDataSource, InterruptedShutdownRetainsHandlerAndCanBeRetried) {
+  using namespace std::chrono_literals;
+  for (int mode = 0; mode < 3; ++mode) {
+    SCOPED_TRACE(mode);  // deadline, primary cancellation, external cancellation
+    test_async::AsioRuntime runtime;
+    TestEnvironment environment;
+    DelayedKafkaConsumer consumer;
+    TestKafkaInput<std::string, int> input{false};
+    auto probe = std::make_shared<DelayedKafkaSourceProbe>();
+    auto lifetime = std::make_shared<int>(1);
+    const std::weak_ptr<int> weakLifetime = lifetime;
+    auto endpoint = servicelib::datasource::kafka::Endpoint<
+        std::string, int, DelayedKafkaSourceHandler>::make(
+        environment, input, consumer,
+        DelayedKafkaSourceHandler{probe, std::move(lifetime)});
+    std::stop_source ownerCancellation;
+    const auto owner = servicelib::Context{}
+        .withStopToken(ownerCancellation.get_token()).bounded(10s);
+    runKafka(endpoint->start(owner));
+    const bool entered = probe->entered.WaitForEvent();
+    EXPECT_TRUE(entered);
+    if (entered) {
+      EXPECT_EQ(probe->messageContext->deadline(), owner.deadline());
+      EXPECT_EQ(probe->messageContext->stopToken(), owner.stopToken());
+    }
+
+    auto expectInterrupted = [&](servicelib::Context context) {
+      auto stopped = boost::asio::co_spawn(
+          servicelib::detail::ParallelExecutorRegistry::Get(),
+          endpoint->stop(std::move(context)), boost::asio::use_future);
+      const bool ready = stopped.wait_for(2s) == std::future_status::ready;
+      EXPECT_TRUE(ready) << "shutdown ignored caller context";
+      // Unblock the worker even if the assertion fails, so a regression
+      // does not strand a polling thread or rely on a process timeout.
+      if (!ready) probe->release.Send();
+      bool interrupted = false;
+      try {
+        stopped.get();
+      } catch (const std::runtime_error& error) {
+        interrupted = true;
+        EXPECT_NE(std::string{error.what()}.find("shutdown wait"), std::string::npos);
+      }
+      EXPECT_TRUE(interrupted) << "incomplete cleanup was reported as successful";
+      return ready && interrupted;
+    };
+
+    std::stop_source shutdownCancellation;
+    auto stopping = owner.bounded(25ms);
+    if (mode == 1) {
+      stopping = owner.withStopToken(shutdownCancellation.get_token());
+      shutdownCancellation.request_stop();
+    } else if (mode == 2) {
+      stopping = owner.withExternalCancellation(shutdownCancellation.get_token());
+      shutdownCancellation.request_stop();
+    }
+    if (entered && expectInterrupted(stopping)) {
+      EXPECT_FALSE(consumer.returned.load(std::memory_order_acquire));
+      EXPECT_EQ(probe->ended.load(std::memory_order_acquire), 0);
+      EXPECT_FALSE(weakLifetime.expired());
+      // Both endpoint layers must retain unfinished cleanup. A premature
+      // started=false would make this second stop silently succeed.
+      expectInterrupted(owner.bounded(25ms));
+    }
+    probe->release.Send();
+    EXPECT_NO_THROW(runKafka(endpoint->stop(owner.bounded(2s))));
+    EXPECT_TRUE(consumer.returned.load(std::memory_order_acquire));
+    EXPECT_EQ(probe->ended.load(std::memory_order_acquire), 1);
+    EXPECT_GE(consumer.stopCalls.load(std::memory_order_relaxed), 1);
+    EXPECT_NO_THROW(runKafka(endpoint->stop(owner.bounded(2s))));
+    endpoint.reset();
+    EXPECT_TRUE(weakLifetime.expired());
+  }
 }
 
 TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {

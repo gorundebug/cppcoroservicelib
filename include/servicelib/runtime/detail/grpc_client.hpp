@@ -231,7 +231,7 @@ class ClientPool final {
   // keeps GrpcContext alive until Stop completes; destructors never suspend.
   ~ClientPool() = default;
 
-  boost::asio::awaitable<void> Stop() { return operations_.stopAndWait(); }
+  boost::asio::awaitable<void> Stop(Context context) { return operations_.stopAndWait(std::move(context)); }
 
   template <auto PrepareAsync, typename Request, typename Response>
   boost::asio::awaitable<Response> unary(

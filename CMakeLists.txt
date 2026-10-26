@@ -259,6 +259,13 @@ if(CPPCOROSERVICELIB_BUILD_TESTS)
   endif()
 
   add_executable(cppcoroservicelib_taskpool_test tests/taskpool_test.cpp)
+  add_executable(cppcoroservicelib_async_operations_context_test
+      tests/async_operations_context_test.cpp)
+  target_link_libraries(cppcoroservicelib_async_operations_context_test PRIVATE
+      servicelib::servicelib GTest::gtest_main)
+  add_test(NAME cppcoroservicelib_async_operations_context_test
+      COMMAND cppcoroservicelib_async_operations_context_test)
+  set_tests_properties(cppcoroservicelib_async_operations_context_test PROPERTIES TIMEOUT 30)
   add_executable(cppcoroservicelib_coroutine_mutex_test
       tests/coroutine_mutex_test.cpp)
   target_link_libraries(cppcoroservicelib_coroutine_mutex_test PRIVATE
@@ -410,7 +417,8 @@ if(CPPCOROSERVICELIB_BUILD_TESTS)
 
   if(CPPCOROSERVICELIB_ENABLE_KAFKA)
     add_executable(cppcoroservicelib_kafka_endpoints_test
-        tests/kafka_endpoints_test.cpp)
+        tests/kafka_endpoints_test.cpp
+        tests/kafka_context_parent_test.cpp)
     target_link_libraries(cppcoroservicelib_kafka_endpoints_test PRIVATE
         servicelib::kafka GTest::gtest_main)
     add_test(NAME cppcoroservicelib_kafka_endpoints_test

@@ -151,7 +151,8 @@ struct Endpoint::Impl final {
     return expression;
   }
 
-  void fire(const libcron::TaskInformation& information) {
+  void fire(const Context& owner, const libcron::TaskInformation& information) {
+    if (owner.cancelled()) return;
     const auto firedAt = Clock::now();
     const auto scheduledAt = firedAt - information.get_delay();
     std::size_t due = 1;
@@ -179,13 +180,13 @@ struct Endpoint::Impl final {
       ++active;
     }
     try {
-      servicelib::detail::ParallelExecutorRegistry::Post([this, scheduledAt]() -> boost::asio::awaitable<void> {
+      servicelib::detail::ParallelExecutorRegistry::Post([this, scheduledAt, owner]() -> boost::asio::awaitable<void> {
         struct ActiveGuard final {
           Impl& impl;
           ~ActiveGuard() { impl.release(); }
         } activeGuard{*this};
         auto context = ApplyDataSourceEndpointTracing(
-            MessageContext{}.withStreamId(NewStreamId()), environment,
+            detail::OccurrenceContext(owner).withStreamId(NewStreamId()), environment,
             endpointId);
         const std::string streamId{context.streamId()};
         const auto started = metrics.requestStart();
@@ -216,18 +217,16 @@ struct Endpoint::Impl final {
     if (notification) notification->Send();
   }
 
-  boost::asio::awaitable<void> stop([[maybe_unused]] Context context) {
+  boost::asio::awaitable<bool> stop(Context context) {
     std::shared_ptr<servicelib::detail::SingleUseEvent> notification;
     {
       std::lock_guard lock(mutex);
       stopping = true;
-      if (active == 0) co_return;
+      if (active == 0) co_return true;
       if (!drained) drained = std::make_shared<servicelib::detail::SingleUseEvent>();
       notification = drained;
     }
-    // ServiceLifecycle bounds its caller's wait and retains shutdown ownership.
-    // The underlying drain must not release graph references while a run lives.
-    co_await notification->AsyncWait();
+    co_return co_await detail::WaitForDrain(std::move(context), std::move(notification));
   }
 
   IServiceEnvironment& environment;
@@ -282,11 +281,11 @@ struct LibcronDataSource::Impl final {
         connectorName(ConnectorConfig(environment, connectorId).name) {}
 
   boost::asio::awaitable<void> tick() {
-    while (started.load(std::memory_order_acquire)) {
+    while (started.load(std::memory_order_acquire) && !stopping.load(std::memory_order_acquire)) {
       timer->expires_after(std::chrono::milliseconds{500});
       boost::system::error_code error;
       co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error || !started.load(std::memory_order_acquire)) co_return;
+      if (error || !started.load(std::memory_order_acquire) || stopping.load(std::memory_order_acquire)) co_return;
       try {
         scheduler.tick();
       } catch (const std::exception& exception) {
@@ -306,9 +305,12 @@ struct LibcronDataSource::Impl final {
   std::string connectorName;
   std::vector<std::shared_ptr<Endpoint>> endpoints;
   Scheduler scheduler;
-  std::unique_ptr<boost::asio::steady_timer> timer;
+  std::shared_ptr<boost::asio::steady_timer> timer;
   std::shared_ptr<servicelib::detail::SingleUseEvent> tickDone;
   std::atomic<bool> started{false};
+  std::atomic<bool> stopping{false};
+  std::mutex lifecycleMutex;
+  std::shared_ptr<servicelib::detail::SingleUseEvent> stopWait;
 };
 
 std::shared_ptr<LibcronDataSource> LibcronDataSource::make(
@@ -341,12 +343,18 @@ void LibcronDataSource::addEndpoint(std::shared_ptr<Endpoint> endpoint) {
 }
 
 boost::asio::awaitable<void> LibcronDataSource::start(Context context) {
-  static_cast<void>(context);
+  if (context.cancelled()) {
+    throw std::runtime_error("cron source context is cancelled or expired");
+  }
+  std::unique_lock lifecycleLock(impl_->lifecycleMutex);
   bool expected = false;
   if (!impl_->started.compare_exchange_strong(expected, true,
                                                std::memory_order_acq_rel)) {
     throw std::logic_error("cron data source is already started");
   }
+  impl_->stopping.store(false, std::memory_order_release);
+  impl_->stopWait.reset();
+  bool tickerLaunched = false;
   std::exception_ptr failure;
   try {
     for (const auto& endpoint : impl_->endpoints) {
@@ -354,14 +362,14 @@ boost::asio::awaitable<void> LibcronDataSource::start(Context context) {
       if (!expression) continue;
       if (!impl_->scheduler.add_schedule(
               endpoint->name(), *expression,
-              [endpoint](const libcron::TaskInformation& information) {
-                endpoint->impl_->fire(information);
+              [endpoint, context](const libcron::TaskInformation& information) {
+                endpoint->impl_->fire(context, information);
               })) {
         throw std::invalid_argument("invalid cron schedule for endpoint " +
                                     endpoint->name());
       }
     }
-    impl_->timer = std::make_unique<boost::asio::steady_timer>(
+    impl_->timer = std::make_shared<boost::asio::steady_timer>(
         boost::asio::make_strand(servicelib::detail::ParallelExecutorRegistry::Get()));
     impl_->tickDone = std::make_shared<servicelib::detail::SingleUseEvent>();
     boost::asio::co_spawn(impl_->timer->get_executor(), impl_->tick(),
@@ -369,32 +377,67 @@ boost::asio::awaitable<void> LibcronDataSource::start(Context context) {
           done->Send();
           if (error) std::rethrow_exception(error);
         });
+    tickerLaunched = true;
   } catch (...) {
     failure = std::current_exception();
+    if (!tickerLaunched && impl_->tickDone) impl_->tickDone->Send();
   }
+  lifecycleLock.unlock();
   if (failure) {
-    co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
-    impl_->started.store(false, std::memory_order_release);
-    impl_->scheduler.clear_schedules();
-    for (const auto& endpoint : impl_->endpoints) co_await endpoint->impl_->stop({});
+    try {
+      co_await stop(context);
+    } catch (...) {
+      // Preserve the startup error and retain incomplete cleanup for stop retry.
+    }
     std::rethrow_exception(failure);
   }
 }
 
 boost::asio::awaitable<void> LibcronDataSource::stop(Context context) {
   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
-  if (!impl_->started.exchange(false, std::memory_order_acq_rel)) co_return;
+  std::shared_ptr<servicelib::detail::SingleUseEvent> attempt;
+  for (;;) {
+    bool ownsAttempt = false;
+    {
+      std::lock_guard lock(impl_->lifecycleMutex);
+      if (!impl_->started.load(std::memory_order_acquire)) co_return;
+      attempt = impl_->stopWait;
+      if (!attempt || attempt->IsReady()) {
+        attempt = std::make_shared<servicelib::detail::SingleUseEvent>();
+        impl_->stopWait = attempt;
+        impl_->stopping.store(true, std::memory_order_release);
+        ownsAttempt = true;
+      }
+    }
+    if (ownsAttempt) break;
+    if (!co_await detail::WaitForDrain(context, attempt)) {
+      throw std::runtime_error("cron shutdown wait was cancelled or expired");
+    }
+  }
+  struct AttemptGuard final {
+    std::shared_ptr<servicelib::detail::SingleUseEvent> done;
+    ~AttemptGuard() { done->Send(); }
+  } guard{attempt};
+
   if (impl_->timer) {
-    co_await boost::asio::co_spawn(impl_->timer->get_executor(),
-        [timer = impl_->timer.get()]() -> boost::asio::awaitable<void> {
-          timer->cancel();
-          co_return;
-        }, boost::asio::use_awaitable);
-    co_await impl_->tickDone->AsyncWait();
+    // Posting cancellation must not make this caller wait for a stalled ticker
+    // executor. The capture keeps the timer alive even after a later restart.
+    boost::asio::post(impl_->timer->get_executor(), [timer = impl_->timer] { timer->cancel(); });
+    if (!co_await detail::WaitForDrain(context, impl_->tickDone)) {
+      throw std::runtime_error("cron ticker shutdown wait was cancelled or expired");
+    }
   }
   impl_->scheduler.clear_schedules();
-  for (const auto& endpoint : impl_->endpoints) co_await endpoint->impl_->stop(context);
-  impl_->timer.reset();
+  bool drained = true;
+  for (const auto& endpoint : impl_->endpoints) {
+    if (!co_await endpoint->impl_->stop(context)) drained = false;
+  }
+  if (!drained) throw std::runtime_error("cron data source still has active executions");
+  {
+    std::lock_guard lock(impl_->lifecycleMutex);
+    impl_->timer.reset();
+    impl_->started.store(false, std::memory_order_release);
+  }
 }
 
 int LibcronDataSource::id() const noexcept { return impl_->connectorId; }

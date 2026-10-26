@@ -113,7 +113,7 @@ class EndpointState final {
 
   boost::asio::awaitable<void> stop(Context context) {
     co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
-    if (!started_.exchange(false, std::memory_order_acq_rel)) co_return;
+    if (!started_.load(std::memory_order_acquire)) co_return;
     std::shared_ptr<servicelib::detail::SingleUseEvent> changed;
     {
       std::lock_guard lock(concurrencyMutex_);
@@ -122,8 +122,11 @@ class EndpointState final {
     }
     if (changed) changed->Send();
     requestStopSource_.request_stop();
-    try { co_await producer_.stop(context); } catch (...) {}
-    co_await producerDone_->AsyncWait();
+    co_await producer_.stop(context);
+    co_await producerDone_->AsyncWait(context);
+    if (!producerDone_->IsReady()) {
+      throw std::runtime_error("Kafka datasource shutdown wait cancelled or expired");
+    }
     for (;;) {
       {
         std::lock_guard lock(concurrencyMutex_);
@@ -132,9 +135,16 @@ class EndpointState final {
           concurrencyChanged_ = std::make_shared<servicelib::detail::SingleUseEvent>();
         changed = concurrencyChanged_;
       }
-      co_await changed->AsyncWait();
+      co_await changed->AsyncWait(context);
+      if (context.cancelled()) {
+        std::lock_guard lock(concurrencyMutex_);
+        if (active_ != 0) {
+          throw std::runtime_error("Kafka datasource requests remain active after shutdown wait");
+        }
+      }
     }
     if (hasResult_) co_await pending_.stop(std::move(context));
+    started_.store(false, std::memory_order_release);
   }
 
   // Result stream entry point. getMessageId and callbacks may execute

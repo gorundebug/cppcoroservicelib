@@ -146,10 +146,10 @@ class Server final {
     }
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> Stop() {
+  [[nodiscard]] boost::asio::awaitable<void> Stop(Context context) {
     BeginShutdown();
     auto drained = DrainEvent();
-    const auto deadline = Context{}.bounded(options_.shutdownTimeout);
+    const auto deadline = context.bounded(options_.shutdownTimeout);
     co_await drained->AsyncWait(deadline);
     if (!drained->IsReady()) {
       for (const auto& session : SnapshotSessions()) session->Stop();
@@ -157,9 +157,12 @@ class Server final {
   }
   
   // Await final retirement before destroying graph objects borrowed by routes.
-  [[nodiscard]] boost::asio::awaitable<void> WaitStopped() {
+  [[nodiscard]] boost::asio::awaitable<void> WaitStopped(Context context) {
     auto drained = DrainEvent();
-    co_await drained->AsyncWait();
+    co_await drained->AsyncWait(context);
+    if (!drained->IsReady()) {
+      throw std::runtime_error("HTTP server shutdown wait cancelled or expired");
+    }
   }
 
   [[nodiscard]] bool running() const noexcept {
@@ -1226,7 +1229,7 @@ class BeastDataSource final {
       error = std::current_exception();
     }
     if (error) {
-      if (server_) co_await server_->Stop();
+      if (server_) co_await server_->Stop(context);
       for (auto it = started.rbegin(); it != started.rend(); ++it)
         co_await (*it)->stop(context);
       std::rethrow_exception(error);
@@ -1234,9 +1237,9 @@ class BeastDataSource final {
   }
   
   [[nodiscard]] boost::asio::awaitable<void> stop(Context context) {
-    if (server_) co_await server_->Stop();
+    if (server_) co_await server_->Stop(context);
     for (const auto& [unused, endpoint] : endpoints_) co_await endpoint->stop(context);
-    if (server_) co_await server_->WaitStopped();
+    if (server_) co_await server_->WaitStopped(context);
   }
 
 

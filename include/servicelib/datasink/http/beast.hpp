@@ -95,7 +95,7 @@ class BeastClient final : public Client {
     if (!client_) throw std::invalid_argument("HTTP client is null");
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> Stop() { return client_->Stop(); }
+  [[nodiscard]] boost::asio::awaitable<void> Stop(Context context) { return client_->Stop(std::move(context)); }
 
   boost::asio::awaitable<Response> perform(
       Request request, MessageContext context) override {
@@ -230,8 +230,8 @@ class BeastEndpoint final : public IEndpoint {
 
   [[nodiscard]] int id() const noexcept override { return endpointId_; }
   void start([[maybe_unused]] Context context) override { operations_.start(); }
-  [[nodiscard]] boost::asio::awaitable<void> stop([[maybe_unused]] Context context) override {
-    co_await operations_.stopAndWait();
+  [[nodiscard]] boost::asio::awaitable<void> stop(Context context) override {
+    co_await operations_.stopAndWait(context);
   }
 
   [[nodiscard]] boost::asio::awaitable<void> consume(MessageContext context, Payload<T> payload) {
@@ -511,7 +511,7 @@ class BeastDataSink final {
         break;
       }
     }
-    co_await stops.stopAndWait();
+    co_await stops.stopAndWait(context);
     if (failure->error) std::rethrow_exception(failure->error);
   }
 

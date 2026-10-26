@@ -111,7 +111,7 @@ TEST(CoroutineExecution, GraphDrainWaitsForInputsAndParallelChildrenWithoutBlock
   }, boost::asio::use_future);
   io.run();
   input.get(); stopper.get(); releaser.get();
-  run(app.stopExecutionRuntime());
+  run(app.stopExecutionRuntime(servicelib::Context{}));
   servicelib::detail::ParallelExecutorRegistry::Clear();
 }
 
@@ -144,7 +144,36 @@ TEST(CoroutineExecution, GraphDrainTimeoutKeepsOwnershipUntilFinalStop) {
   }, boost::asio::use_future);
   io.run();
   input.get(); stopper.get(); releaser.get();
-  run(app.stopExecutionRuntime());
+  run(app.stopExecutionRuntime(servicelib::Context{}));
+  servicelib::detail::ParallelExecutorRegistry::Clear();
+}
+
+template <typename T>
+concept HasContextFreeRuntimeStop = requires(T& app) { app.stopExecutionRuntime(); };
+template <typename T>
+concept HasContextFreeRuntimeDrain = requires(T& app) { app.drainExecutionRuntime(); };
+static_assert(!HasContextFreeRuntimeStop<GraphDrainApp<6>>);
+static_assert(!HasContextFreeRuntimeDrain<GraphDrainApp<6>>);
+
+TEST(CoroutineExecution, FinalStopDeadlineRetainsGraphUntilExplicitRetry) {
+  boost::asio::io_context io;
+  GraphDrainApp<6> app;
+  servicelib::detail::ParallelExecutorRegistry::Set(io.get_executor());
+  app.startExecutionRuntime();
+  std::optional<GraphDrainApp<6>::InputInvocation> invocation;
+  invocation.emplace(app.beginInputInvocation());
+  const servicelib::Context ownerContext;
+  run([&]() -> awaitable<void> {
+    EXPECT_THROW(co_await app.stopExecutionRuntime(ownerContext.withDeadline(
+        std::chrono::steady_clock::now() + 1ms)), std::runtime_error);
+    // A timed-out final stop must leave the runtime attached and undrained.
+    EXPECT_FALSE(co_await app.drainExecutionRuntime(ownerContext.withDeadline(
+        std::chrono::steady_clock::now())));
+    invocation.reset();
+    EXPECT_TRUE(co_await app.drainExecutionRuntime(ownerContext));
+    co_await app.stopExecutionRuntime(ownerContext);
+    co_await app.stopExecutionRuntime(ownerContext);
+  }());
   servicelib::detail::ParallelExecutorRegistry::Clear();
 }
 
@@ -194,7 +223,7 @@ TEST(CoroutineExecution, GraphDrainWakesNativeAndCoroutineWaiters) {
   for (auto& waiter : coroutines) waiter.get();
   releaser.get();
   EXPECT_EQ(nativeCompleted.load(), 2);
-  run(app.stopExecutionRuntime());
+  run(app.stopExecutionRuntime(servicelib::Context{}));
   servicelib::detail::ParallelExecutorRegistry::Clear();
 }
 
@@ -217,7 +246,7 @@ TEST(CoroutineExecution, GraphFinalStopWaitsWithoutOccupyingTheOnlyWorker) {
   auto stopper = boost::asio::co_spawn(io, [&]() -> awaitable<void> {
     co_await entered.AsyncWait();
     stopping.Send();
-    co_await app.stopExecutionRuntime();
+    co_await app.stopExecutionRuntime(servicelib::Context{});
     EXPECT_TRUE(completed);
     stopped.set_value();
   }, boost::asio::use_future);
@@ -266,8 +295,8 @@ TEST(CoroutineExecution, GraphDrainIncludesParallelCallbackCaptureCleanup) {
     EXPECT_TRUE(entered);
     EXPECT_FALSE(drainedBeforeCleanup);
     EXPECT_TRUE(cleanupCompleted.load());
-    EXPECT_TRUE(run(app.drainExecutionRuntime()));
-    run(app.stopExecutionRuntime());
+    EXPECT_TRUE(run(app.drainExecutionRuntime(servicelib::Context{})));
+    run(app.stopExecutionRuntime(servicelib::Context{}));
     servicelib::detail::ParallelExecutorRegistry::Clear();
   }
 }

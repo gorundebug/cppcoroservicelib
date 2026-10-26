@@ -374,7 +374,7 @@ protected:
         [](std::shared_ptr<grpc::Channel> channel) { return Protocol::NewStub(std::move(channel)); });
   }
   void TearDown() override {
-    if (pool) asio::co_spawn(Executor(), pool->Stop(), asio::use_future).get();
+    if (pool) asio::co_spawn(Executor(), pool->Stop(servicelib::Context{}), asio::use_future).get();
     pool.reset();
     if (server) server->Shutdown(std::chrono::system_clock::now() + 3s);
     server.reset();

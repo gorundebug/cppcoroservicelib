@@ -404,7 +404,7 @@ class ResultOwnershipApp final
 
   void startAndReleaseRuntime() {
     startExecutionRuntime();
-    runTopology(stopExecutionRuntime());
+    runTopology(stopExecutionRuntime(servicelib::Context{}));
   }
 
   void releaseInput() { input_.reset(); }

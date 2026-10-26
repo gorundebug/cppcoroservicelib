@@ -470,7 +470,7 @@ class ProducerAdapter final {
   ProducerAdapter(ConsumerClient& client, IServiceEnvironment& environment)
       : client_(client), tracingEnabled_(environment.getTracing() != nullptr) {}
 
-  boost::asio::awaitable<void> start(Context, Consumer consumer) {
+  boost::asio::awaitable<void> start(Context context, Consumer consumer) {
     co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
     struct Completion final {
       servicelib::detail::SingleUseEvent done;
@@ -481,10 +481,12 @@ class ProducerAdapter final {
     // The third-party polling API is explicitly blocking. Only this dedicated
     // thread and its partition lanes may wait on futures, never Asio workers.
     std::thread polling([client = &client_, tracingEnabled = tracingEnabled_,
+                         owner = std::move(context),
                          consumer = std::move(consumer), executor, completion] {
       try {
-        client->start([tracingEnabled, consumer, executor](ConsumerMessage message) {
-          auto context = servicelib::detail::ContextFromKafkaHeaders(message.headers(), tracingEnabled);
+        client->start([owner, tracingEnabled, consumer, executor](ConsumerMessage message) {
+          auto context = servicelib::detail::ContextFromKafkaHeaders(
+              MessageContext{owner}, message.headers(), tracingEnabled);
           boost::asio::co_spawn(executor,
               consumer(std::move(context), Payload<ConsumerMessage>::make(std::move(message))),
               boost::asio::use_future).get();
@@ -607,8 +609,8 @@ class Endpoint final {
   }
   boost::asio::awaitable<void> stop(Context context) {
     if (!started_) co_return;
-    started_ = false;
     co_await implementation_.stop(std::move(context));
+    started_ = false;
   }
   boost::asio::awaitable<void> consumeResult(MessageContext context, Payload<R> payload) {
     return implementation_.consumeResult(std::move(context), std::move(payload));

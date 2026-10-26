@@ -177,13 +177,13 @@ TEST(CoroResolver, HttpHostnameRequestAndStopShareTheCallersEventLoop) {
   EXPECT_EQ(value.status, 200);
   EXPECT_EQ(value.body, "resolved");
   EXPECT_EQ(ThreadIds(), threads);
-  auto stop = asio::co_spawn(io, client.Stop(), asio::use_future);
+  auto stop = asio::co_spawn(io, client.Stop(servicelib::Context{}), asio::use_future);
   ASSERT_TRUE(Ready(io, stop));
   stop.get();
-  auto server_stop = asio::co_spawn(io, server.Stop(), asio::use_future);
+  auto server_stop = asio::co_spawn(io, server.Stop(servicelib::Context{}), asio::use_future);
   ASSERT_TRUE(Ready(io, server_stop));
   server_stop.get();
-  auto retired = asio::co_spawn(io, server.WaitStopped(), asio::use_future);
+  auto retired = asio::co_spawn(io, server.WaitStopped(servicelib::Context{}), asio::use_future);
   ASSERT_TRUE(Ready(io, retired));
   retired.get();
 }
@@ -232,7 +232,7 @@ void CheckPendingHttpDns(int mode) {
   ASSERT_TRUE(dns.WaitForQuery(io));
   EXPECT_EQ(ThreadIds(), threads);
   std::optional<std::future<void>> stopped;
-  if (mode == 0) stopped.emplace(asio::co_spawn(io, client.Stop(), asio::use_future));
+  if (mode == 0) stopped.emplace(asio::co_spawn(io, client.Stop(servicelib::Context{}), asio::use_future));
   if (mode == 1) cancel.request_stop();
   ASSERT_TRUE(Ready(io, response));
   try {
@@ -242,7 +242,7 @@ void CheckPendingHttpDns(int mode) {
     using Code = servicelib::http::ClientErrorCode;
     EXPECT_EQ(error.code(), mode == 0 ? Code::kStopped : mode == 1 ? Code::kCancelled : Code::kTimeout);
   }
-  if (!stopped) stopped.emplace(asio::co_spawn(io, client.Stop(), asio::use_future));
+  if (!stopped) stopped.emplace(asio::co_spawn(io, client.Stop(servicelib::Context{}), asio::use_future));
   ASSERT_TRUE(Ready(io, *stopped));
   stopped->get();
   EXPECT_EQ(ThreadIds(), threads);

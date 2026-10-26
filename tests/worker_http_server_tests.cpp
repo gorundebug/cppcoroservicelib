@@ -26,10 +26,10 @@ asio::any_io_executor OtherWorker(Runtime& runtime, const asio::any_io_executor&
 }
 
 void StopServer(Runtime& runtime, Server& server) {
-  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(), asio::use_future);
+  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
   stopped.get();
-  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(), asio::use_future);
+  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(retired.wait_for(3s), std::future_status::ready);
   retired.get();
 }
@@ -116,12 +116,12 @@ TEST(WorkerHttpServer, ShutdownWaitsForAcceptedConnectionHandoff) {
   while (server.acceptedConnections() != 2 && std::chrono::steady_clock::now() < deadline)
     std::this_thread::sleep_for(1ms);
   EXPECT_EQ(server.acceptedConnections(), 2u);
-  auto stopped = asio::co_spawn(listener, server.Stop(), asio::use_future);
+  auto stopped = asio::co_spawn(listener, server.Stop(servicelib::Context{}), asio::use_future);
   EXPECT_EQ(stopped.wait_for(20ms), std::future_status::timeout);
   gate.Open();
   ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
   stopped.get();
-  auto retired = asio::co_spawn(listener, server.WaitStopped(), asio::use_future);
+  auto retired = asio::co_spawn(listener, server.WaitStopped(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(retired.wait_for(3s), std::future_status::ready);
   retired.get();
   first.close();

@@ -150,7 +150,7 @@ TEST(CoroRaces, PeerResetsDoNotKillListenerOrOutstandingRpc) {
     }
     ASSERT_EQ(storm.wait_for(15s), std::future_status::ready);
     EXPECT_NO_THROW(storm.get());
-    auto stop = asio::co_spawn(runtime.executor(), pool.Stop(), asio::use_future);
+    auto stop = asio::co_spawn(runtime.executor(), pool.Stop(servicelib::Context{}), asio::use_future);
     ASSERT_EQ(stop.wait_for(3s), std::future_status::ready);
     stop.get();
   }

@@ -31,6 +31,22 @@ namespace servicelib::datasource::cron {
 
 namespace detail {
 
+inline MessageContext OccurrenceContext(const Context& owner) {
+  auto context = MessageContext{}.withStopToken(owner.stopToken())
+                     .withDeadline(owner.deadline())
+                     .withSampling(owner.samplingEnabled());
+  for (const auto& token : owner.externalStopTokens()) {
+    context = std::move(context).withExternalCancellation(token);
+  }
+  return context;
+}
+
+inline boost::asio::awaitable<bool> WaitForDrain(
+    Context context, std::shared_ptr<servicelib::detail::SingleUseEvent> notification) {
+  co_await notification->AsyncWait(context);
+  co_return notification->IsReady();
+}
+
 class ResultWaiter final {
  public:
   enum class Completion { kCompleted, kMissing, kDuplicate };

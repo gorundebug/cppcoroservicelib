@@ -153,10 +153,10 @@ void CheckSharedRuntime(std::size_t workers, bool perWorkerIo = false, bool publ
     EXPECT_EQ(shared_workers, workers);
     EXPECT_LE(timer_workers, 1u);
     const auto stop_executor = publicHttpLifecycle ? runtime.executor() : http_owner;
-    auto stop_http = asio::co_spawn(stop_executor, http_server->Stop(), asio::use_future);
+    auto stop_http = asio::co_spawn(stop_executor, http_server->Stop(servicelib::Context{}), asio::use_future);
     ASSERT_EQ(stop_http.wait_for(3s), std::future_status::ready);
     stop_http.get();
-    auto retired = asio::co_spawn(stop_executor, http_server->WaitStopped(), asio::use_future);
+    auto retired = asio::co_spawn(stop_executor, http_server->WaitStopped(servicelib::Context{}), asio::use_future);
     ASSERT_EQ(retired.wait_for(3s), std::future_status::ready);
     retired.get();
     if (publicHttpLifecycle) {
@@ -170,7 +170,7 @@ void CheckSharedRuntime(std::size_t workers, bool perWorkerIo = false, bool publ
     ASSERT_EQ(released_http.wait_for(3s), std::future_status::ready);
     released_http.get();
     }
-    auto stop_pool = asio::co_spawn(runtime.executor(), pool->Stop(), asio::use_future);
+    auto stop_pool = asio::co_spawn(runtime.executor(), pool->Stop(servicelib::Context{}), asio::use_future);
     ASSERT_EQ(stop_pool.wait_for(3s), std::future_status::ready);
     stop_pool.get();
     router.reset();
@@ -240,10 +240,10 @@ TEST(CoroRuntime, KeepAliveDisconnectCancelsOnlyTheCurrentRequest) {
   EXPECT_TRUE(second_cancelled);
   ASSERT_TRUE(first_context.has_value());
   EXPECT_FALSE(first_context->cancelled());
-  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(), asio::use_future);
+  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
   stopped.get();
-  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(), asio::use_future);
+  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(retired.wait_for(3s), std::future_status::ready);
   retired.get();
 }
@@ -291,10 +291,10 @@ TEST(CoroRuntime, DisconnectObserverPreservesPipelinedRequestsAndRetiresOnIdleSh
   }
   // Leave the client connection open: shutdown must retire an idle observer,
   // not rely on the peer to release the Session's last owning reference.
-  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(), asio::use_future);
+  auto stopped = asio::co_spawn(runtime.executor(), server.Stop(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
   stopped.get();
-  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(), asio::use_future);
+  auto retired = asio::co_spawn(runtime.executor(), server.WaitStopped(servicelib::Context{}), asio::use_future);
   ASSERT_EQ(retired.wait_for(3s), std::future_status::ready);
   retired.get();
   socket.close();

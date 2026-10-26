@@ -216,10 +216,13 @@ class Client final {
 
  public:
   // Await shutdown before releasing the host and its executor.
-  [[nodiscard]] boost::asio::awaitable<void> Stop() {
+  [[nodiscard]] boost::asio::awaitable<void> Stop(Context context) {
     auto state = state_;
     BeginStop(state);
-    co_await state->drained.AsyncWait();
+    co_await state->drained.AsyncWait(context);
+    if (!state->drained.IsReady()) {
+      throw std::runtime_error("HTTP client shutdown wait cancelled or expired");
+    }
   }
 
   [[nodiscard]] std::size_t connectionCount() const {

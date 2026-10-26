@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -87,13 +88,67 @@ class ShutdownTask final {
     co_return ready();
   }
 
-  [[nodiscard]] boost::asio::awaitable<std::exception_ptr> get() const {
-    co_await state_->done.AsyncWait();
+  [[nodiscard]] boost::asio::awaitable<std::exception_ptr> get(Context context) const {
+    if (!(co_await wait(context))) {
+      throw std::runtime_error("shutdown task wait cancelled or expired");
+    }
     std::lock_guard lock(state_->mutex);
     co_return state_->error;
   }
  private:
   std::shared_ptr<State> state_;
+};
+
+// Serializes lifecycle transitions without holding a native mutex across await.
+// Each contender waits with its own context; releasing may run on any worker.
+class LifecycleGate final {
+ public:
+  class Guard final {
+   public:
+    explicit Guard(LifecycleGate& gate) noexcept : gate_(&gate) {}
+    Guard(const Guard&) = delete;
+    Guard& operator=(const Guard&) = delete;
+    Guard(Guard&& other) noexcept : gate_(std::exchange(other.gate_, nullptr)) {}
+    ~Guard() { reset(); }
+    void reset() noexcept {
+      if (auto* gate = std::exchange(gate_, nullptr)) gate->release();
+    }
+   private:
+    LifecycleGate* gate_;
+  };
+
+  [[nodiscard]] boost::asio::awaitable<Guard> acquire(Context context) {
+    for (;;) {
+      std::shared_ptr<SingleUseEvent> notification;
+      {
+        std::lock_guard lock(mutex_);
+        if (!busy_) {
+          busy_ = true;
+          co_return Guard(*this);
+        }
+        if (!released_) released_ = std::make_shared<SingleUseEvent>();
+        notification = released_;
+      }
+      co_await notification->AsyncWait(context);
+      if (!notification->IsReady()) {
+        throw std::runtime_error("service lifecycle transition wait cancelled or expired");
+      }
+    }
+  }
+
+ private:
+  void release() {
+    std::shared_ptr<SingleUseEvent> notification;
+    {
+      std::lock_guard lock(mutex_);
+      busy_ = false;
+      notification = std::move(released_);
+    }
+    if (notification) notification->Send();
+  }
+  std::mutex mutex_;
+  bool busy_{};
+  std::shared_ptr<SingleUseEvent> released_;
 };
 
 }  // namespace detail
@@ -114,6 +169,8 @@ enum class ServiceComponentKind : std::size_t {
 // registers objects; it never starts individual endpoints or pools.
 class ServiceLifecycle final {
  public:
+  using GraphDrainer = std::function<boost::asio::awaitable<bool>(Context)>;
+
   ServiceLifecycle() = default;
   ServiceLifecycle(const ServiceLifecycle&) = delete;
   ServiceLifecycle& operator=(const ServiceLifecycle&) = delete;
@@ -156,25 +213,36 @@ class ServiceLifecycle final {
         .onStopTimeout = std::move(onStopTimeout)});
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> start(Context context) {
+  [[nodiscard]] boost::asio::awaitable<void> start(Context context, GraphDrainer graphDrainer = {}) {
+    auto transition = co_await transition_.acquire(context);
     if (state_ != State::kCreated) {
       throw std::logic_error("service lifecycle is already started");
     }
+    graphDrainer_ = std::move(graphDrainer);
     state_ = State::kStarting;
     std::exception_ptr error;
     try {
       for (const auto kind : kStartOrder) {
         for (auto& entry : entries_[index(kind)]) {
-          co_await entry.start(context);
+          if (context.cancelled()) {
+            throw std::runtime_error("service startup cancelled or expired");
+          }
           started_.push_back(&entry);
+          co_await entry.start(context);
         }
       }
     } catch (...) {
       error = std::current_exception();
     }
     if (error) {
-      co_await stopStarted(context);
-      state_ = State::kStopped;
+      state_ = State::kStopping;
+      pendingShutdown_.store(true, std::memory_order_release);
+      transition.reset();
+      try {
+        co_await stop(context);
+      } catch (...) {
+        // Retain failed/in-flight stops; the primary startup error wins.
+      }
       std::rethrow_exception(error);
     }
     state_ = State::kRunning;
@@ -183,29 +251,34 @@ class ServiceLifecycle final {
   [[nodiscard]] boost::asio::awaitable<void> stop(Context context,
             log::Logger& logger = log::NoopLogger::instance()) {
     co_await stopBeforeGraphDrain(context, logger);
+    if (graphDrainer_ && !(co_await graphDrainer_(context))) {
+      throw std::runtime_error("startup graph drain cancelled or expired");
+    }
     co_await stopAfterGraphDrain(context, logger);
   }
 
   [[nodiscard]] boost::asio::awaitable<void> stopBeforeGraphDrain(
       Context context, log::Logger& logger = log::NoopLogger::instance()) {
+    auto transition = co_await transition_.acquire(context);
     if (state_ == State::kCreated) {
       state_ = State::kStopped;
       clear();
       co_return;
     }
     if (state_ == State::kStopped) co_return;
-    if (state_ != State::kRunning) {
+    if (state_ != State::kRunning && state_ != State::kStopping) {
       throw std::logic_error("service lifecycle transition is in progress");
     }
 
     state_ = State::kStopping;
+    pendingShutdown_.store(true, std::memory_order_release);
     // Close and drain every root producer before touching the graph
     // executors. A source that was accepted before shutdown may still enqueue
     // work into a task pool while its stop() is draining.
     std::vector<Entry*> admission;
-    appendReverse(admission,
+    appendStartedReverse(admission,
                   entries_[index(ServiceComponentKind::kDataSource)]);
-    appendReverse(admission,
+    appendStartedReverse(admission,
                   entries_[index(ServiceComponentKind::kComponent)]);
     co_await stopPhase(context, logger, admission);
 
@@ -214,44 +287,44 @@ class ServiceLifecycle final {
     // a pool task may create a ParallelCall after the counter was observed at
     // zero.
     std::vector<Entry*> executors;
-    appendReverse(executors,
+    appendStartedReverse(executors,
                   entries_[index(ServiceComponentKind::kPriorityTaskPool)]);
-    appendReverse(executors,
+    appendStartedReverse(executors,
                   entries_[index(ServiceComponentKind::kTaskPool)]);
-    appendReverse(executors,
+    appendStartedReverse(executors,
                   entries_[index(ServiceComponentKind::kDelayPool)]);
-    appendReverse(executors, entries_[index(ServiceComponentKind::kStorage)]);
+    appendStartedReverse(executors, entries_[index(ServiceComponentKind::kStorage)]);
     co_await stopPhase(context, logger, executors);
+    beforeGraphStopped_ = true;
   }
 
   [[nodiscard]] boost::asio::awaitable<void> stopAfterGraphDrain(
       Context context, log::Logger& logger = log::NoopLogger::instance()) {
+    auto transition = co_await transition_.acquire(context);
     if (state_ == State::kStopped) co_return;
     if (state_ != State::kStopping) {
       throw std::logic_error(
           "service lifecycle graph drain phase has not started");
     }
+    if (!beforeGraphStopped_) {
+      throw std::runtime_error("root producers have not stopped");
+    }
     std::vector<Entry*> sinks;
-    appendReverse(sinks, entries_[index(ServiceComponentKind::kDataSink)]);
+    appendStartedReverse(sinks, entries_[index(ServiceComponentKind::kDataSink)]);
     co_await stopPhase(context, logger, sinks);
 
     state_ = State::kStopped;
-    if (!hasPendingShutdown()) co_await finishShutdown(logger);
+    pendingStops_.clear();
+    pendingShutdown_.store(false, std::memory_order_release);
+    clear();
   }
 
   bool hasPendingShutdown() const {
-    for (const auto& pending : pendingStops_) {
-      if (!pending.task.ready()) return true;
-    }
-    return false;
+    return pendingShutdown_.load(std::memory_order_acquire);
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> finishShutdown(log::Logger& logger = log::NoopLogger::instance()) {
-    for (auto& pending : pendingStops_) {
-      reportStop(pending, co_await pending.task.get(), logger);
-    }
-    pendingStops_.clear();
-    clear();
+  [[nodiscard]] boost::asio::awaitable<void> finishShutdown(Context context, log::Logger& logger = log::NoopLogger::instance()) {
+    co_await stop(context, logger);
   }
 
  private:
@@ -266,6 +339,11 @@ class ServiceLifecycle final {
     }
     co_return;
   }
+
+  GraphDrainer graphDrainer_;
+  detail::LifecycleGate transition_;
+  bool beforeGraphStopped_{};
+  std::atomic<bool> pendingShutdown_{};
 
   enum class State { kCreated, kStarting, kRunning, kStopping, kStopped };
 
@@ -377,10 +455,12 @@ class ServiceLifecycle final {
     };
   }
 
-  static void appendReverse(std::vector<Entry*>& target,
+  void appendStartedReverse(std::vector<Entry*>& target,
                             std::vector<Entry>& entries) {
     for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
-      target.push_back(&*it);
+      if (std::find(started_.begin(), started_.end(), &*it) != started_.end()) {
+        target.push_back(&*it);
+      }
     }
   }
 
@@ -402,9 +482,17 @@ class ServiceLifecycle final {
   [[nodiscard]] boost::asio::awaitable<void> stopPhase(Context context, log::Logger& logger,
                         const std::vector<Entry*>& entries) {
     if (entries.empty()) co_return;
-    const auto first = pendingStops_.size();
-    pendingStops_.reserve(first + entries.size());
+    pendingStops_.reserve(pendingStops_.size() + entries.size());
     for (auto* entry : entries) {
+      auto existing = std::find_if(pendingStops_.begin(), pendingStops_.end(),
+          [entry](const PendingStop& pending) { return pending.entry == entry; });
+      if (existing != pendingStops_.end()) {
+        // Reuse an in-flight stop and never stop a successful sibling twice.
+        if (!existing->task.ready() || !(co_await existing->task.get(context))) continue;
+        // A completed failure is retried only when this phase is called again.
+        pendingStops_.erase(existing);
+      }
+
       auto stop = entry->stop;
       auto owner = entry->owner;
       pendingStops_.push_back(PendingStop{entry, detail::ShutdownTask(
@@ -414,17 +502,28 @@ class ServiceLifecycle final {
             co_await stop(std::move(context));
           })});
     }
-    for (auto i = first; i < pendingStops_.size(); ++i) {
-      auto& pending = pendingStops_[i];
+    std::exception_ptr failure;
+    for (auto* entry : entries) {
+      // A failed later phase must not prevent reaching that phase on retry.
+      // Transition ownership keeps pendingStops_ stable while these waits suspend.
+      auto found = std::find_if(pendingStops_.begin(), pendingStops_.end(),
+          [entry](const PendingStop& pending) { return pending.entry == entry; });
+      auto& pending = *found;
       if (!co_await pending.task.wait(context)) {
         if (pending.entry->onStopTimeout) pending.entry->onStopTimeout();
         else {
           logFailure(logger, "service shutdown operation timed out", *pending.entry);
         }
+        if (!failure) failure = std::make_exception_ptr(
+            std::runtime_error("service lifecycle shutdown cancelled or expired"));
         continue;
       }
-      reportStop(pending, co_await pending.task.get(), logger);
+      auto error = co_await pending.task.get(context);
+      reportStop(pending, error, logger);
+      if (error && !failure) failure = error;
     }
+    // A later phase may depend on every resource in this phase.
+    if (failure) std::rethrow_exception(failure);
   }
 
   static void reportStop(PendingStop& pending, std::exception_ptr error,
@@ -444,15 +543,7 @@ class ServiceLifecycle final {
     }
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> stopStarted(Context context) {
-    for (auto it = started_.rbegin(); it != started_.rend(); ++it) {
-      try {
-        co_await (*it)->stop(context);
-      } catch (...) {
-      }
-    }
-    clear();
-  }
+
 
   void clear() noexcept {
     started_.clear();
@@ -563,29 +654,48 @@ class ServiceApp
     lifecycle_.add(ServiceComponentKind::kComponent, std::move(component));
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> start(Context context = {}) {
-    if (running_) throw std::logic_error("service is already started");
+  [[nodiscard]] boost::asio::awaitable<void> start(Context context) {
+    auto transition = co_await serviceTransition_.acquire(context);
+    if (running_.load() || shutdownPending_.load()) {
+      throw std::logic_error("service is already active");
+    }
+    if (requiresSharedLifetime(context) && !getShutdownLifetime()) {
+      throw std::logic_error("bounded service startup requires shared lifetime ownership");
+    }
+    ownerContext_ = context;
     ensureServiceInfoMetric();
     ensureConfiguredPools();
     this->startExecutionRuntime();
+    shutdownPending_.store(true, std::memory_order_release);
     std::exception_ptr error;
     try {
       status::Registry::Register(*this);
-      co_await lifecycle_.start(std::move(context));
-      running_ = true;
+      co_await lifecycle_.start(context, [this](Context drainContext) {
+        return this->drainExecutionRuntime(std::move(drainContext));
+      });
+      running_.store(true, std::memory_order_release);
     } catch (...) {
       error = std::current_exception();
     }
     if (error) {
       status::Registry::Unregister(*this);
-      co_await this->stopExecutionRuntime();
-      releaseOwnedRuntimeObjects();
+      try {
+        // Seal admission without waiting for failed producers to retire.
+        static_cast<void>(co_await this->drainExecutionRuntime(
+            context.withDeadline(std::chrono::steady_clock::now())));
+        if (!lifecycle_.hasPendingShutdown()) co_await finishShutdown(context);
+      } catch (...) {
+        // Never replace the startup error with a cleanup timeout/failure.
+      }
+      if (shutdownPending_.load(std::memory_order_acquire)) {
+        deferredLifetime_ = getShutdownLifetime();
+      }
       std::rethrow_exception(error);
     }
   }
 
   void setShutdownLifetime(const std::shared_ptr<void>& lifetime) {
-    if (running_) throw std::logic_error("shutdown lifetime must be set before start");
+    if (running_.load() || shutdownPending_.load()) throw std::logic_error("shutdown lifetime must be set before start");
     shutdownLifetime_ = lifetime;
   }
 
@@ -595,69 +705,75 @@ class ServiceApp
   }
 
   // Hosts keep their executor running until deferred shutdown work retires.
-  // Call after stop; a service whose startup failed has no shutdown to await.
-  [[nodiscard]] boost::asio::awaitable<void> waitForShutdown() {
-    if (auto completed = shutdownComplete_.load(std::memory_order_acquire)) {
-      co_await completed->AsyncWait();
+  // Call after stop, including cleanup requested after a partial startup failure.
+  [[nodiscard]] boost::asio::awaitable<void> waitForShutdown(Context context) {
+    auto completion = shutdownTask_.load(std::memory_order_acquire);
+    if (!completion) {
+      auto transition = co_await serviceTransition_.acquire(context);
+      completion = shutdownTask_.load(std::memory_order_acquire);
+      if (!completion) {
+        if (shutdownPending_.load(std::memory_order_acquire)) {
+          throw std::runtime_error("service shutdown has not completed");
+        }
+        co_return;
+      }
+    }
+    if (auto error = co_await completion->get(context)) {
+      std::rethrow_exception(error);
     }
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> stop(Context context = {}) {
-    if (!running_) co_return;
+  [[nodiscard]] boost::asio::awaitable<void> stop(Context context) {
     co_await boost::asio::this_coro::reset_cancellation_state(
         boost::asio::disable_cancellation());
     if (const auto service = this->getServiceConfigSnapshot();
         service && service->shutdownTimeout > 0) {
       context = context.bounded(std::chrono::milliseconds{service->shutdownTimeout});
     }
-    auto lifetime = shutdownLifetime_.lock();
-    if (!lifetime) lifetime = this->weak_from_this().lock();
-    bool cancellable = context.deadline().has_value() || context.stopToken().stop_possible();
-    for (auto token : context.externalStopTokens()) cancellable |= token.stop_possible();
-    if (cancellable && !lifetime) {
+    auto transition = co_await serviceTransition_.acquire(context);
+    auto completion = shutdownTask_.load(std::memory_order_acquire);
+    if (completion && !completion->ready()) {
+      transition.reset();
+      if (auto error = co_await completion->get(context)) std::rethrow_exception(error);
+      co_return;
+    }
+    if (!running_.load() && !shutdownPending_.load()) co_return;
+    auto lifetime = getShutdownLifetime();
+    if (requiresSharedLifetime(context) && !lifetime) {
       throw std::logic_error("bounded service shutdown requires shared lifetime ownership");
     }
-    shutdownComplete_.store(std::make_shared<detail::SingleUseEvent>(),
-                            std::memory_order_release);
-    running_ = false;
+    running_.store(false, std::memory_order_release);
     status::Registry::Unregister(*this);
-
-    std::exception_ptr lifecycleError;
-    try {
-      co_await lifecycle_.stopBeforeGraphDrain(context, this->getLogger());
-    } catch (...) {
-      lifecycleError = std::current_exception();
+    if (!lifetime) {
+      co_await finishShutdown(context);
+      co_return;
     }
-    // First drain ordinary graph work while callers and streams are still
-    // alive. Sink completion may itself emit result/error values, so sinks
-    // must quiesce before the execution runtime is released.
-    if (!(co_await this->drainExecutionRuntime(context))) {
-      try {
-        this->getLogger().warn("service graph drain timed out");
-      } catch (...) {
-      }
-    }
-    try {
-      co_await lifecycle_.stopAfterGraphDrain(context, this->getLogger());
-    } catch (...) {
-      if (!lifecycleError) lifecycleError = std::current_exception();
-    }
-    if (lifecycle_.hasPendingShutdown() || !(co_await this->drainExecutionRuntime(context))) {
-      // Retain the complete host, including telemetry and transport runtime.
-      // The strong field also preserves safety if the control thread cannot start.
-      deferredLifetime_ = lifetime;
-      [[maybe_unused]] detail::ShutdownTask cleanup(
-          [this, lifetime = std::move(lifetime)]() -> boost::asio::awaitable<void> {
-            co_await finishShutdown();
-            deferredLifetime_.reset();
-          });
-    } else {
-      co_await finishShutdown();
-    }
-    if (lifecycleError) std::rethrow_exception(lifecycleError);
+    deferredLifetime_ = lifetime;
+    completion = std::make_shared<detail::ShutdownTask>(
+        [this, context, ownerContext = *ownerContext_,
+         lifetime = std::move(lifetime)]() -> boost::asio::awaitable<void> {
+          static_cast<void>(lifetime);
+          std::exception_ptr failure;
+          try {
+            co_await finishShutdown(context);
+          } catch (...) {
+            failure = std::current_exception();
+          }
+          if (failure) {
+            if (!context.cancelled()) std::rethrow_exception(failure);
+            // The caller's wait may end first. Cleanup still belongs to the
+            // saved service owner; it does not invent an uncancellable root.
+            co_await finishShutdown(ownerContext);
+          }
+          deferredLifetime_.reset();
+        });
+    shutdownTask_.store(completion, std::memory_order_release);
+    transition.reset();
+    if (auto error = co_await completion->get(context)) std::rethrow_exception(error);
   }
 
-  bool isRunning() const noexcept { return running_; }
+  bool isRunning() const noexcept { return running_.load(std::memory_order_acquire); }
+  bool isStopped() const noexcept { return !shutdownPending_.load(std::memory_order_acquire); }
 
   std::string networkDataJson() const override {
     return this->makeStatusNetworkDataJson();
@@ -723,6 +839,13 @@ class ServiceApp
   }
 
  private:
+  static bool requiresSharedLifetime(const Context& context) noexcept {
+    if (context.deadline().has_value() || context.stopToken().stop_possible()) return true;
+    return std::any_of(context.externalStopTokens().begin(),
+                       context.externalStopTokens().end(),
+                       [](std::stop_token token) { return token.stop_possible(); });
+  }
+
   static std::string environmentName(api::Environment environment) {
     switch (environment) {
       case api::Environment::kLocal:
@@ -763,25 +886,30 @@ class ServiceApp
     priorityTaskPools_.clear();
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> finishShutdown() {
-    co_await lifecycle_.finishShutdown(this->getLogger());
-    co_await this->stopExecutionRuntime();
-    releaseOwnedRuntimeObjects();
-    if (auto completed = shutdownComplete_.load(std::memory_order_acquire)) {
-      completed->Send();
+  [[nodiscard]] boost::asio::awaitable<void> finishShutdown(Context context) {
+    co_await lifecycle_.stopBeforeGraphDrain(context, this->getLogger());
+    if (!(co_await this->drainExecutionRuntime(context))) {
+      throw std::runtime_error("stream execution shutdown cancelled or expired");
     }
+    co_await lifecycle_.stopAfterGraphDrain(context, this->getLogger());
+    co_await this->stopExecutionRuntime(context);
+    releaseOwnedRuntimeObjects();
+    shutdownPending_.store(false, std::memory_order_release);
   }
 
   ServiceLifecycle lifecycle_;
+  std::optional<Context> ownerContext_;
   std::weak_ptr<void> shutdownLifetime_;
   std::shared_ptr<void> deferredLifetime_;
-  std::atomic<std::shared_ptr<detail::SingleUseEvent>> shutdownComplete_;
+  detail::LifecycleGate serviceTransition_;
+  std::atomic<std::shared_ptr<detail::ShutdownTask>> shutdownTask_;
+  std::atomic<bool> shutdownPending_{};
   std::shared_ptr<pool::IDelayPool> delayPool_;
   std::unordered_map<std::string, std::shared_ptr<pool::ITaskPool>> taskPools_;
   std::unordered_map<std::string, std::shared_ptr<pool::IPriorityTaskPool>>
       priorityTaskPools_;
   std::unique_ptr<metrics::Int64Gauge> serviceInfoGauge_;
-  bool running_{false};
+  std::atomic<bool> running_{false};
 };
 
 }  // namespace servicelib

@@ -316,6 +316,17 @@ class MessageContext final : public Context {
  public:
   MessageContext() : Context(std::make_shared<ContextState>()) {}
 
+  // A transport message inherits the service lifecycle rather than creating
+  // an independent cancellation/deadline root. Message-to-message copies
+  // still use the copy constructor and preserve all message-local fields.
+  explicit MessageContext(const Context& parent)
+      : Context(std::make_shared<ContextState>()) {
+    state_->stopToken = parent.stopToken();
+    state_->deadline = parent.deadline();
+    state_->externalCancellations = parent.externalStopTokens();
+    state_->traceSamplingEnabled = parent.samplingEnabled();
+  }
+
   template <typename T>
   [[nodiscard]] MessageContext withLocalValue(
       const ContextKey<T>& key, std::shared_ptr<T> value) const {

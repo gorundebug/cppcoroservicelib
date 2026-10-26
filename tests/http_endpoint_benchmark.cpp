@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
   immediate->stop(servicelib::Context{});
   remote->stop(servicelib::Context{});
   delayed->stop(servicelib::Context{});
-  server.Stop();
+  server.Stop(servicelib::Context{});
   client.Drain();
   delays->stop(servicelib::Context{});
   runtime.Stop();

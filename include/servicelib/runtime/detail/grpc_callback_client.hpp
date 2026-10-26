@@ -43,7 +43,7 @@ public:
     }
   }
 
-  boost::asio::awaitable<void> Stop() { return operations_.stopAndWait(); }
+  boost::asio::awaitable<void> Stop(Context context) { return operations_.stopAndWait(std::move(context)); }
 
   template<class Request, class Response, class Start>
   boost::asio::awaitable<Response> unary(Request request,

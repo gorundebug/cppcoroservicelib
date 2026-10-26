@@ -996,7 +996,7 @@ TEST(HttpDataSource,
   EXPECT_EQ(endCalls, 1);
 
   waitHttp(io, endpoint.stop(servicelib::Context{}));
-  waitHttp(io, server.Stop());
+  waitHttp(io, server.Stop(servicelib::Context{}));
   workGuard.reset();
   io.stop();
   servicelib::detail::ParallelExecutorRegistry::Clear();
@@ -1090,7 +1090,7 @@ TEST(HttpServer, GracefulStopDrainsAcceptedRequestAndClosesKeepAlive) {
   ASSERT_TRUE(accepted.WaitUntil(std::chrono::steady_clock::now() +
                                  std::chrono::seconds{2}));
 
-  auto stopped = std::async(std::launch::async, [&] { waitHttp(io, server.Stop()); });
+  auto stopped = std::async(std::launch::async, [&] { waitHttp(io, server.Stop(servicelib::Context{})); });
   EXPECT_EQ(stopped.wait_for(std::chrono::milliseconds{30}),
             std::future_status::timeout);
   release.Send();
@@ -1138,7 +1138,7 @@ TEST(HttpServer, ShutdownDeadlineForcesCancellationOfAcceptedRequest) {
                                  std::chrono::seconds{2}));
 
   const auto started = std::chrono::steady_clock::now();
-  waitHttp(io, server.Stop());
+  waitHttp(io, server.Stop(servicelib::Context{}));
   const auto elapsed = std::chrono::steady_clock::now() - started;
   EXPECT_GE(elapsed, std::chrono::milliseconds{20});
   EXPECT_LT(elapsed, std::chrono::seconds{2});
@@ -1187,7 +1187,7 @@ TEST(HttpServer, ShutdownDeadlineDoesNotWaitForUncooperativeHandler) {
     EXPECT_TRUE(accepted.WaitUntil(std::chrono::steady_clock::now() +
                                   std::chrono::seconds{2}));
 
-    auto stopped = std::async(std::launch::async, [&] { waitHttp(io, server->Stop()); });
+    auto stopped = std::async(std::launch::async, [&] { waitHttp(io, server->Stop(servicelib::Context{})); });
     const bool returnedBeforeHandler =
         stopped.wait_for(std::chrono::seconds{1}) == std::future_status::ready;
     EXPECT_TRUE(returnedBeforeHandler)
@@ -1279,8 +1279,8 @@ TEST(HttpServer, RoutesGetPostKeepsConnectionAndEnforcesBodyLimit) {
   const auto tooLarge = send("POST", "/items", "abcd");
   EXPECT_EQ(tooLarge.status, 413);
   EXPECT_FALSE(tooLarge.keepAlive);
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1322,8 +1322,8 @@ TEST(HttpServer, DispatchesBusinessHandlerOnWorkerExecutorOutsideSocketStrand) {
   EXPECT_EQ(response.get().body, "worker");
   EXPECT_TRUE(handlerUsedWorkerExecutor.load(std::memory_order_acquire));
 
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1367,7 +1367,7 @@ TEST(HttpClient, StopCancelsAndJoinsAcceptedSendBeforeReturning) {
   ASSERT_TRUE(accepted.WaitUntil(std::chrono::steady_clock::now() +
                                  std::chrono::seconds{2}));
 
-  auto stopped = std::async(std::launch::async, [&] { waitHttp(io, client.Stop()); });
+  auto stopped = std::async(std::launch::async, [&] { waitHttp(io, client.Stop(servicelib::Context{})); });
   ASSERT_EQ(stopped.wait_for(std::chrono::seconds{2}),
             std::future_status::ready);
   stopped.get();
@@ -1389,7 +1389,7 @@ TEST(HttpClient, StopCancelsAndJoinsAcceptedSendBeforeReturning) {
   ASSERT_EQ(rejected.wait_for(std::chrono::seconds{2}),
             std::future_status::ready);
   EXPECT_EQ(rejected.get(), servicelib::http::ClientErrorCode::kStopped);
-  waitHttp(io, server.Stop());
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1437,8 +1437,8 @@ TEST(HttpClient, RequestDeadlineCancelsAcceptedReadAndMapsTimeout) {
             std::future_status::ready);
   EXPECT_EQ(response.get(), servicelib::http::ClientErrorCode::kTimeout);
   never.Send();
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1483,8 +1483,8 @@ TEST(HttpClient, ExternalCancellationInterruptsAcceptedRead) {
   ASSERT_EQ(response.wait_for(std::chrono::seconds{2}),
             std::future_status::ready);
   EXPECT_EQ(response.get(), servicelib::http::ClientErrorCode::kCancelled);
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1544,8 +1544,8 @@ TEST(HttpClient, PoolLimitQueuesAndHonorsAcquisitionDeadline) {
   ASSERT_EQ(first.wait_for(std::chrono::seconds{2}),
             std::future_status::ready);
   EXPECT_EQ(first.get().status, 200);
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1598,8 +1598,8 @@ TEST(HttpClient, CancelledPoolWaiterDoesNotLeakTheConnectionOrPoll) {
   EXPECT_EQ(next.wait_for(std::chrono::seconds{2}), std::future_status::ready);
   EXPECT_EQ(next.get().status, 200);
   EXPECT_EQ(client.connectionCount(), 1U);
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1643,7 +1643,7 @@ TEST(HttpClient, ReusesKeepAliveConnectionWithinConfiguredPool) {
             std::future_status::ready);
   EXPECT_NO_THROW(served.get());
   EXPECT_EQ(client.connectionCount(), 1U);
-  waitHttp(io, client.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
   acceptor.close();
   io.stop();
 }
@@ -1714,8 +1714,8 @@ TEST(HttpClient, MapsResolveConnectAndBodyLimitErrors) {
   ASSERT_EQ(body.wait_for(std::chrono::seconds{2}),
             std::future_status::ready);
   EXPECT_EQ(body.get(), servicelib::http::ClientErrorCode::kBodyLimit);
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1827,8 +1827,8 @@ TEST(HttpContext, RoundTripsSupportedPropagationOverRealTcp) {
   EXPECT_EQ(received->trace().baggage, "tenant=acme");
   ASSERT_TRUE(received->deadline().has_value());
   EXPECT_GT(*received->deadline(), std::chrono::steady_clock::now());
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
 }
 
@@ -1874,8 +1874,8 @@ TEST(HttpClientProfiling, DISABLED_KeepAlivePoolHotPath) {
         });
   }
   io.run();
-  runHttp(io, client.Stop());
-  runHttp(io, server.Stop());
+  runHttp(io, client.Stop(servicelib::Context{}));
+  runHttp(io, server.Stop(servicelib::Context{}));
   workGuard.reset();
   if (workerError) std::rethrow_exception(workerError);
   EXPECT_GT(requests, 0U);
@@ -2280,8 +2280,8 @@ co_return;}, boost::asio::use_future));
   std::jthread worker([&io] { io.run(); });
   for (auto& call : calls) EXPECT_NO_THROW(call.get());
   waitHttp(io, endpoint.stop({}));
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
   worker.join();
   EXPECT_EQ(wireIds.size(), callCount);
@@ -2412,8 +2412,8 @@ co_return;}, boost::asio::use_future);
   }
   EXPECT_NO_THROW(sibling.get());
   waitHttp(io, endpoint.stop({}));
-  waitHttp(io, client.Stop());
-  waitHttp(io, server.Stop());
+  waitHttp(io, client.Stop(servicelib::Context{}));
+  waitHttp(io, server.Stop(servicelib::Context{}));
   io.stop();
   worker.join();
   EXPECT_EQ(ended.load(), 2);

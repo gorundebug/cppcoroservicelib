@@ -81,15 +81,15 @@ class WorkerHttpClient : public testing::Test {
   void TearDown() override {
     release.Send();
     if (client) {
-      auto stopped = asio::co_spawn(owners[0]->executor(), client->Stop(), asio::use_future);
+      auto stopped = asio::co_spawn(owners[0]->executor(), client->Stop(servicelib::Context{}), asio::use_future);
       Get(stopped);
       client.reset();
     }
     On(1, [] {});
     if (server) {
-      auto stopped = asio::co_spawn(owners[0]->executor(), server->Stop(), asio::use_future);
+      auto stopped = asio::co_spawn(owners[0]->executor(), server->Stop(servicelib::Context{}), asio::use_future);
       Get(stopped);
-      auto retired = asio::co_spawn(owners[0]->executor(), server->WaitStopped(), asio::use_future);
+      auto retired = asio::co_spawn(owners[0]->executor(), server->WaitStopped(servicelib::Context{}), asio::use_future);
       Get(retired);
       On(0, [this] { server.reset(); });
     }
@@ -145,7 +145,7 @@ TEST_F(WorkerHttpClient, StopFromAnotherWorkerRetiresActiveRead) {
   auto response = Send(0, "stopped", "/hold");
   auto accepted = asio::co_spawn(owners[0]->executor(), entered.AsyncWait(), asio::use_future);
   Get(accepted);
-  auto stopped = asio::co_spawn(owners[0]->executor(), client->Stop(), asio::use_future);
+  auto stopped = asio::co_spawn(owners[0]->executor(), client->Stop(servicelib::Context{}), asio::use_future);
   Get(stopped);
   try {
     static_cast<void>(Get(response));

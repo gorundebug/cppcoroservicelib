@@ -1053,7 +1053,7 @@ int main() {
     CheckCoroutinePooledWrites<false>(pool, requests);
     CheckCoroutinePooledWrites<true>(pool, requests);
     CheckNestedServerSubStreams(pool, port, serverSubStreams);
-    runAwaitable(pool.Stop());
+    runAwaitable(pool.Stop(servicelib::Context{}));
   }
 
   {

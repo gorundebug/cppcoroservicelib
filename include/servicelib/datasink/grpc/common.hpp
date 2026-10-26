@@ -243,8 +243,8 @@ class Endpoint : public IEndpoint {
   void start([[maybe_unused]] Context context) override {
     asyncOperations_.start();
   }
-  boost::asio::awaitable<void> stop([[maybe_unused]] Context context) override {
-    return asyncOperations_.stopAndWait();
+  boost::asio::awaitable<void> stop(Context context) override {
+    return asyncOperations_.stopAndWait(std::move(context));
   }
 
   [[nodiscard]] config::GrpcEndpointConfig endpointConfig() const {

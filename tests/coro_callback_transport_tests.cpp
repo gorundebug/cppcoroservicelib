@@ -407,7 +407,7 @@ TEST_F(CoroCallbackTransport, CoroutineClientPreservesResultsAndRejectsAdmission
     ASSERT_EQ(results[index].wait_for(8s), std::future_status::ready);
     EXPECT_EQ(results[index].get().value(), "pooled-" + std::to_string(index));
   }
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   ASSERT_EQ(stopped.wait_for(2s), std::future_status::ready);
   stopped.get();
   auto rejected = boost::asio::co_spawn(io,
@@ -499,7 +499,7 @@ TEST_F(CoroCallbackTransport, ForwardedDeadlineSubtractsTimeSpentInTheFirstServi
   // after the first service has already spent 250 ms.
   EXPECT_LE(service.remaining_deadline_ms.load(), 4800);
   forwarding_server->Shutdown(std::chrono::system_clock::now() + 3s);
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   ASSERT_EQ(stopped.wait_for(3s), std::future_status::ready);
   stopped.get();
 }
@@ -601,7 +601,7 @@ TEST_F(CoroCallbackTransport, CoroutineStreamingClientsPreserveOrderAndUseShared
     ASSERT_EQ(result.wait_for(8s), std::future_status::ready);
     EXPECT_NO_THROW(result.get());
   }
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   ASSERT_EQ(stopped.wait_for(2s), std::future_status::ready);
   stopped.get();
   EXPECT_EQ(values[0], (std::vector<std::string>{"part-0", "part-1", "part-2", "part-3"}));
@@ -639,7 +639,7 @@ TEST_F(CoroCallbackTransport, IdleStreamingWritersRetireOnCancellationAndDeadlin
       EXPECT_THROW(rejected.get(), std::exception);
     }
   }
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   ASSERT_EQ(stopped.wait_for(2s), std::future_status::ready);
   stopped.get();
 }
@@ -666,7 +666,7 @@ TEST_F(CoroCallbackTransport, StreamingHandlerFailureRetiresTransportAndPreserve
   } catch (const std::runtime_error& error) {
     EXPECT_STREQ(error.what(), "business response failed");
   }
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   ASSERT_EQ(stopped.wait_for(2s), std::future_status::ready);
   stopped.get();
   EXPECT_EQ(calls.load(), 1);
@@ -692,7 +692,7 @@ TEST_F(CoroCallbackTransport, StopWaitsForStreamingResponseHandlersAfterTranspor
   ASSERT_EQ(sent.wait_for(8s), std::future_status::ready);
   sent.get();
   EXPECT_TRUE(entered.WaitUntil(std::chrono::steady_clock::now() + 3s));
-  auto stopped = boost::asio::co_spawn(io, pool.Stop(), boost::asio::use_future);
+  auto stopped = boost::asio::co_spawn(io, pool.Stop(servicelib::Context{}), boost::asio::use_future);
   EXPECT_EQ(stopped.wait_for(50ms), std::future_status::timeout);
   release.Send();
   ASSERT_EQ(result.wait_for(3s), std::future_status::ready);

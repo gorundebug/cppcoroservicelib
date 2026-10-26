@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -279,30 +280,42 @@ void startsAndStopsInServiceOrder() {
 void rollsBackStartedComponents() {
   EventLog events;
   servicelib::ServiceLifecycle lifecycle;
-  lifecycle.add(servicelib::ServiceComponentKind::kDataSource,
-                std::make_shared<Component>("source", &events, true));
+  auto source = std::make_shared<Component>("source", &events, true);
+  auto failingSink = std::make_shared<Component>("failing-sink", &events, false, true);
+  auto storage = std::make_shared<Component>("storage", &events, false, true);
+  lifecycle.add(servicelib::ServiceComponentKind::kDataSource, source);
   lifecycle.add(servicelib::ServiceComponentKind::kDataSink,
                 std::make_shared<Component>("sink", &events));
-  lifecycle.add(servicelib::ServiceComponentKind::kDataSink,
-                std::make_shared<Component>("failing-sink", &events, false, true));
-  lifecycle.add(servicelib::ServiceComponentKind::kStorage,
-                std::make_shared<Component>("storage", &events, false, true));
+  lifecycle.add(servicelib::ServiceComponentKind::kDataSink, failingSink);
+  lifecycle.add(servicelib::ServiceComponentKind::kStorage, storage);
   bool failed = false;
-  try {
-    runLifecycle(lifecycle.start({}));
-  } catch (const std::runtime_error& error) {
+  try { runLifecycle(lifecycle.start({})); }
+  catch (const std::runtime_error& error) {
     failed = true;
     Require(std::string_view(error.what()) == "start failed");
   }
-  Require(failed);
-  Require((events.snapshot() ==
-          std::vector<std::string>{"storage:start", "sink:start",
-                                   "failing-sink:start", "source:start",
-                                   "failing-sink:stop", "sink:stop",
-                                   "storage:stop"}));
-  const auto afterRollback = events.snapshot();
-  runLifecycle(lifecycle.stop({}));
-  Require(events.snapshot() == afterRollback);
+  Require(failed && lifecycle.hasPendingShutdown());
+  Require((events.snapshot() == std::vector<std::string>{
+      "storage:start", "sink:start", "failing-sink:start", "source:start",
+      "source:stop", "storage:stop"}));
+  storage->failStop = false;
+  bool sinkFailed = false;
+  try { runLifecycle(lifecycle.finishShutdown(servicelib::Context{})); }
+  catch (const std::runtime_error& error) {
+    sinkFailed = true;
+    Require(std::string_view(error.what()) == "stop failed");
+  }
+  Require(sinkFailed && lifecycle.hasPendingShutdown());
+  failingSink->failStop = false;
+  runLifecycle(lifecycle.finishShutdown(servicelib::Context{}));
+  Require(!lifecycle.hasPendingShutdown());
+  Require((events.snapshot() == std::vector<std::string>{
+      "storage:start", "sink:start", "failing-sink:start", "source:start",
+      "source:stop", "storage:stop", "storage:stop", "failing-sink:stop",
+      "sink:stop", "failing-sink:stop"}));
+  const auto completed = events.snapshot();
+  runLifecycle(lifecycle.stop(servicelib::Context{}));
+  Require(events.snapshot() == completed);
 }
 
 void stopFailureDoesNotSkipResources() {
@@ -314,7 +327,10 @@ void stopFailureDoesNotSkipResources() {
   lifecycle.add(servicelib::ServiceComponentKind::kComponent,
                 std::make_shared<Component>("failing", &events, false, true));
   runLifecycle(lifecycle.start({}));
-  runLifecycle(lifecycle.stop({}, logger));
+  bool interrupted = false;
+  try { runLifecycle(lifecycle.stop({}, logger)); }
+  catch (const std::runtime_error&) { interrupted = true; }
+  if (!interrupted) throw std::runtime_error("incomplete lifecycle shutdown must report failure");
   const auto recorded = events.snapshot();
   Require(std::find(recorded.begin(), recorded.end(), "healthy:stop") !=
          recorded.end());
@@ -340,8 +356,11 @@ void deadlineDiagnosesButDoesNotReleaseLiveResource() {
                     release));
   runLifecycle(lifecycle.start({}));
   const auto started = std::chrono::steady_clock::now();
-  runLifecycle(lifecycle.stop(servicelib::Context{}.bounded(std::chrono::milliseconds{1}),
-                 logger));
+  bool interrupted = false;
+  try { runLifecycle(lifecycle.stop(servicelib::Context{}.bounded(std::chrono::milliseconds{1}),
+                 logger)); }
+  catch (const std::runtime_error&) { interrupted = true; }
+  if (!interrupted) throw std::runtime_error("incomplete lifecycle shutdown must report failure");
   Require(std::chrono::steady_clock::now() - started < std::chrono::seconds{2});
   Require(!stopped.load());
   Require(logger.records.size() == 1);
@@ -349,7 +368,7 @@ void deadlineDiagnosesButDoesNotReleaseLiveResource() {
          "service shutdown operation timed out");
   Require(logger.records.front().resource == "component:0");
   release->Send();
-  runLifecycle(lifecycle.finishShutdown(logger));
+  runLifecycle(lifecycle.finishShutdown(servicelib::Context{}, logger));
   Require(stopped.load());
 }
 
@@ -367,8 +386,11 @@ void connectorTimeoutMatchesTelemetry() {
                     release),
                 &metrics, &logger);
   runLifecycle(lifecycle.start({}));
-  runLifecycle(lifecycle.stop(servicelib::Context{}.bounded(std::chrono::milliseconds{1}),
-                 logger));
+  bool interrupted = false;
+  try { runLifecycle(lifecycle.stop(servicelib::Context{}.bounded(std::chrono::milliseconds{1}),
+                 logger)); }
+  catch (const std::runtime_error&) { interrupted = true; }
+  if (!interrupted) throw std::runtime_error("incomplete lifecycle shutdown must report failure");
   Require(!stopped.load());
   Require(metrics
              .counter("datasource_connector.events_total",
@@ -378,7 +400,7 @@ void connectorTimeoutMatchesTelemetry() {
   Require(entries.size() == 1);
   Require(entries.front().message == "data source stopped by timeout");
   release->Send();
-  runLifecycle(lifecycle.finishShutdown(logger));
+  runLifecycle(lifecycle.finishShutdown(servicelib::Context{}, logger));
   Require(stopped.load());
 }
 
@@ -400,13 +422,14 @@ void exposesCanonicalServiceInfoMetric() {
   servicelib::testmetrics::TestMetrics metrics;
   {
     TelemetryService service(metrics);
-    runLifecycle(service.start());
+    const servicelib::Context context;
+    runLifecycle(service.start(context));
     Require(metrics
                .gauge("service.info",
                       {{"service", "Metrics Service"},
                        {"environment", "debug"}})
                .value() == 1);
-    runLifecycle(service.stop());
+    runLifecycle(service.stop(context));
   }
   servicelib::config::RuntimeConfigRegistry::Publish({});
 }
@@ -434,13 +457,14 @@ void stopWaitsForAcceptedInputInvocation() {
       std::make_shared<const servicelib::config::RuntimeConfig>(config));
   {
     Service service;
-    runLifecycle(service.start());
+    const servicelib::Context context;
+    runLifecycle(service.start(context));
     auto invocation = std::make_unique<
         decltype(service.beginInputInvocation())>(
         service.beginInputInvocation());
     std::atomic<bool> stopReturned{false};
     std::thread stopThread([&] {
-      runLifecycle(service.stop());
+      runLifecycle(service.stop(context));
       stopReturned.store(true, std::memory_order_release);
     });
 
@@ -467,6 +491,7 @@ void stopDeadlineReturnsBeforeAcceptedInputCompletes() {
   servicelib::config::RuntimeConfigRegistry::Publish(
       std::make_shared<const servicelib::config::RuntimeConfig>(config));
   bool returnedByDeadline = false;
+  bool incompleteReported = false;
   {
     auto destroyed = std::make_shared<std::promise<void>>();
     auto destruction = destroyed->get_future();
@@ -475,31 +500,188 @@ void stopDeadlineReturnsBeforeAcceptedInputCompletes() {
       destroyed->set_value();
     });
     std::weak_ptr<Service> retained = service;
-    runLifecycle(service->start());
+    const servicelib::Context context;
+    runLifecycle(service->start(context));
     auto invocation = std::make_unique<
         decltype(service->beginInputInvocation())>(
         service->beginInputInvocation());
     auto stopped = std::async(std::launch::async, [&] {
-      runLifecycle(service->stop(servicelib::Context{}.bounded(std::chrono::milliseconds{20})));
+      runLifecycle(service->stop(context.bounded(std::chrono::milliseconds{20})));
     });
     // The generous watchdog is not the requested shutdown deadline. It lets
     // the test report an unbounded wait without leaving a blocked thread.
     returnedByDeadline =
         stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready;
     if (returnedByDeadline) {
-      stopped.get();
+      try { stopped.get(); }
+      catch (const std::runtime_error&) { incompleteReported = true; }
       service.reset();
       Require(!retained.expired());
       invocation.reset();
     } else {
       invocation.reset();
-      stopped.get();
+      try { stopped.get(); }
+      catch (const std::runtime_error&) { incompleteReported = true; }
       service.reset();
     }
     Require(destruction.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
   }
   servicelib::config::RuntimeConfigRegistry::Publish({});
   Require(returnedByDeadline);
+  Require(incompleteReported);
+}
+
+struct ContextOwnerProbeStage {
+  std::function<void(servicelib::Context)> onStart;
+  std::function<boost::asio::awaitable<void>(servicelib::Context)> onStop;
+  void start(servicelib::Context context) {
+    if (onStart) { onStart(std::move(context)); }
+  }
+  boost::asio::awaitable<void> stop(servicelib::Context context) {
+    if (onStop) { co_await onStop(std::move(context)); }
+  }
+};
+
+void verifyContextOwner(bool condition, const char* message) {
+  if (!condition) { throw std::runtime_error(message); }
+}
+
+std::string contextOwnerFailure(boost::asio::awaitable<void> operation) {
+  try { runLifecycle(std::move(operation)); }
+  catch (const std::exception& error) { return error.what(); }
+  return {};
+}
+
+void startupFailureKeepsItsServiceUntilRetry() {
+  struct State {
+    std::optional<decltype(std::declval<Service&>().beginInputInvocation())> invocation;
+    servicelib::detail::SingleUseEvent release;
+    std::atomic<int> stops{};
+  };
+  auto state = std::make_shared<State>();
+  auto service = std::make_shared<Service>();
+  auto stage = std::make_shared<ContextOwnerProbeStage>();
+  stage->onStart = [service, state](servicelib::Context) {
+    state->invocation.emplace(service->beginInputInvocation());
+    throw std::runtime_error("primary startup failure");
+  };
+  stage->onStop = [state](servicelib::Context) -> boost::asio::awaitable<void> {
+    ++state->stops;
+    co_await state->release.AsyncWait();
+  };
+  service->addComponent(stage);
+  const auto error = contextOwnerFailure(service->start(
+      servicelib::Context{}.bounded(std::chrono::milliseconds{2})));
+  stage->onStart = {};
+  const bool pending = !service->isStopped();
+  state->release.Send();
+  state->invocation.reset();
+  std::weak_ptr<Service> retained = service;
+  service.reset();
+  auto retry = retained.lock();
+  if (error != "primary startup failure") { throw std::runtime_error("unexpected startup error: " + error); }
+  verifyContextOwner(pending && retry != nullptr, "failed startup did not retain its service");
+  runLifecycle(retry->stop(servicelib::Context{}.bounded(std::chrono::seconds{2})));
+  verifyContextOwner(retry->isStopped(), "startup retry did not finish");
+  verifyContextOwner(state->stops.load() == 1, "startup retry duplicated an in-flight stop");
+  retry.reset();
+  verifyContextOwner(retained.expired(), "successful retry retained the service");
+}
+
+void shutdownFailureIsObservableAndRetryable() {
+  auto service = std::make_shared<Service>();
+  auto stops = std::make_shared<std::atomic<int>>(0);
+  auto stage = std::make_shared<ContextOwnerProbeStage>();
+  stage->onStop = [stops](servicelib::Context) -> boost::asio::awaitable<void> {
+    if (stops->fetch_add(1) == 0) { throw std::runtime_error("component stop failure"); }
+    co_return;
+  };
+  service->addComponent(stage);
+  runLifecycle(service->start(servicelib::Context{}));
+  const auto first = contextOwnerFailure(service->stop(servicelib::Context{}));
+  const auto observed = contextOwnerFailure(service->waitForShutdown(
+      servicelib::Context{}.bounded(std::chrono::seconds{2})));
+  verifyContextOwner(first == "component stop failure", "stop failure was swallowed");
+  verifyContextOwner(observed == first, "waitForShutdown lost the stop result");
+  verifyContextOwner(!service->isStopped(), "failed shutdown was marked complete");
+  runLifecycle(service->stop(servicelib::Context{}));
+  verifyContextOwner(service->isStopped() && stops->load() == 2, "explicit stop retry failed");
+}
+
+void repeatedBoundedStopsShareOneOperation() {
+  struct State { servicelib::detail::SingleUseEvent release; std::atomic<int> stops{}; };
+  auto state = std::make_shared<State>();
+  auto service = std::make_shared<Service>();
+  auto stage = std::make_shared<ContextOwnerProbeStage>();
+  stage->onStop = [state](servicelib::Context) -> boost::asio::awaitable<void> {
+    ++state->stops;
+    co_await state->release.AsyncWait();
+  };
+  service->addComponent(stage);
+  runLifecycle(service->start(servicelib::Context{}));
+  const auto first = contextOwnerFailure(service->stop(
+      servicelib::Context{}.bounded(std::chrono::milliseconds{2})));
+  const auto second = contextOwnerFailure(service->stop(
+      servicelib::Context{}.bounded(std::chrono::milliseconds{2})));
+  const auto calls = state->stops.load();
+  state->release.Send();
+  runLifecycle(service->waitForShutdown(
+      servicelib::Context{}.bounded(std::chrono::seconds{2})));
+  verifyContextOwner(!first.empty() && !second.empty(), "bounded stop did not report incomplete wait");
+  verifyContextOwner(calls == 1 && state->stops.load() == 1, "bounded callers duplicated cleanup");
+  verifyContextOwner(service->isStopped(), "owner-context finalization did not complete");
+}
+
+void cancellableStartupRequiresOwnershipBeforeSideEffects() {
+  std::stop_source cancellation;
+  const servicelib::Context root;
+  for (const auto& context : std::vector<servicelib::Context>{
+           root.bounded(std::chrono::seconds{2}),
+           root.withStopToken(cancellation.get_token())}) {
+    Service service;
+    int starts = 0;
+    int stops = 0;
+    auto stage = std::make_shared<ContextOwnerProbeStage>();
+    stage->onStart = [&starts](servicelib::Context) { ++starts; };
+    stage->onStop = [&stops](servicelib::Context) -> boost::asio::awaitable<void> {
+      ++stops;
+      co_return;
+    };
+    service.addComponent(stage);
+    const auto error = contextOwnerFailure(service.start(context));
+    verifyContextOwner(error == "bounded service startup requires shared lifetime ownership",
+                       "cancellable stack startup must reject missing lifetime ownership");
+    verifyContextOwner(starts == 0 && stops == 0 && service.isStopped(),
+                       "rejected startup must not start components or require cleanup");
+    runLifecycle(service.start(root));
+    runLifecycle(service.stop(root));
+    verifyContextOwner(starts == 1 && stops == 1 && service.isStopped(),
+                       "rejected startup changed the service lifecycle");
+  }
+}
+
+void externalHostLifetimeAllowsCancellableStartup() {
+  struct Host { Service service; };
+  auto host = std::make_shared<Host>();
+  std::weak_ptr<Host> retained = host;
+  host->service.setShutdownLifetime(host);
+  int starts = 0;
+  int stops = 0;
+  auto stage = std::make_shared<ContextOwnerProbeStage>();
+  stage->onStart = [&starts](servicelib::Context) { ++starts; };
+  stage->onStop = [&stops](servicelib::Context) -> boost::asio::awaitable<void> {
+    ++stops;
+    co_return;
+  };
+  host->service.addComponent(stage);
+  const auto context = servicelib::Context{}.bounded(std::chrono::seconds{2});
+  runLifecycle(host->service.start(context));
+  runLifecycle(host->service.stop(context));
+  runLifecycle(host->service.waitForShutdown(context));
+  verifyContextOwner(starts == 1 && stops == 1 && host->service.isStopped(),
+                     "external host ownership must support cancellable lifecycle");
+  host.reset();
+  verifyContextOwner(retained.expired(), "completed shutdown retained external host");
 }
 
 }  // namespace
@@ -524,4 +706,13 @@ int main() {
   runtimeConfigSnapshotOwnsConcreteConfigAcrossReload();
   stopWaitsForAcceptedInputInvocation();
   stopDeadlineReturnsBeforeAcceptedInputCompletes();
+  const ServiceInfoConfig config;
+  servicelib::config::RuntimeConfigRegistry::Publish(
+      std::make_shared<const servicelib::config::RuntimeConfig>(config));
+  startupFailureKeepsItsServiceUntilRetry();
+  shutdownFailureIsObservableAndRetryable();
+  repeatedBoundedStopsShareOneOperation();
+  cancellableStartupRequiresOwnershipBeforeSideEffects();
+  externalHostLifetimeAllowsCancellableStartup();
+  servicelib::config::RuntimeConfigRegistry::Publish({});
 }

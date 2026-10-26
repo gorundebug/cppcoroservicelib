@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+
+#include <servicelib/runtime/context.hpp>
 
 #include <servicelib/runtime/detail/sync.hpp>
 
@@ -53,17 +56,21 @@ class AsyncOperations final {
     state_->accepting = true;
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> stopAndWait() {
-    std::unique_lock lock(state_->mutex);
-    state_->accepting = false;
-    while (state_->active != 0) {
-      // Allocate only when shutdown has work to drain. The caller suspends
-      // without retaining a worker or the admission mutex.
-      if (!state_->drained) state_->drained = std::make_shared<SingleUseEvent>();
-      auto drained = state_->drained;
+  [[nodiscard]] boost::asio::awaitable<void> stopAndWait(Context context) {
+    auto state = state_;
+    std::unique_lock lock(state->mutex);
+    state->accepting = false;
+    while (state->active != 0) {
+      // Keep operation ownership after a caller stops waiting. A later caller
+      // can observe the same physical completion without reopening admission.
+      if (!state->drained) state->drained = std::make_shared<SingleUseEvent>();
+      auto drained = state->drained;
       lock.unlock();
-      co_await drained->AsyncWait();
+      co_await drained->AsyncWait(context);
       lock.lock();
+      if (state->active != 0 && context.cancelled()) {
+        throw std::runtime_error("transport shutdown wait cancelled or expired");
+      }
     }
   }
 

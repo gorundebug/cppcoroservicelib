@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <stop_token>
 #include <tuple>
 #include <unordered_map>
@@ -313,7 +314,7 @@ class StreamExecutionEnvironment : public NotCopyableOrMovable,
     }
   }
 
-  [[nodiscard]] boost::asio::awaitable<bool> drainExecutionRuntime(Context context = {}) {
+  [[nodiscard]] boost::asio::awaitable<bool> drainExecutionRuntime(Context context) {
     if (!activeRuntime_) co_return true;
     std::unique_lock lock(parallelMutex_);
     inputClosed_ = true;
@@ -334,10 +335,12 @@ class StreamExecutionEnvironment : public NotCopyableOrMovable,
     co_return true;
   }
   
-  [[nodiscard]] boost::asio::awaitable<void> stopExecutionRuntime() {
+  [[nodiscard]] boost::asio::awaitable<void> stopExecutionRuntime(Context context) {
     if (!activeRuntime_) co_return;
     // Keep streams and callers alive until admitted work has retired.
-    static_cast<void>(co_await drainExecutionRuntime());
+    if (!(co_await drainExecutionRuntime(context))) {
+      throw std::runtime_error("stream execution shutdown cancelled or expired");
+    }
     auto* runtime = activeRuntime_;
     {
       std::lock_guard lock(parallelMutex_);

@@ -458,15 +458,15 @@ class Endpoint final {
     enabled_.store(true, std::memory_order_release);
   }
 
-  [[nodiscard]] boost::asio::awaitable<void> stop(Context) {
+  [[nodiscard]] boost::asio::awaitable<void> stop(Context context) {
     co_await boost::asio::this_coro::reset_cancellation_state(
         boost::asio::disable_cancellation());
     enabled_.store(false, std::memory_order_release);
     producer_.requestStop();
     // Accepted handlers can still enqueue deliveries. Close that admission
     // only after those handlers have completed.
-    co_await requests_.stopAndWait();
-    co_await deliveries_.stopAndWait();
+    co_await requests_.stopAndWait(context);
+    co_await deliveries_.stopAndWait(context);
     if (producerStarted_) {
       auto shutdown = [this] { producer_.stop(); };
       co_await detail::RunBlocking(std::move(shutdown));
