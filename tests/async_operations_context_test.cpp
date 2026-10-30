@@ -1,6 +1,7 @@
 #include <chrono>
 #include <future>
 #include <stop_token>
+#include <thread>
 
 #include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
@@ -18,6 +19,29 @@ using servicelib::detail::AsyncOperations;
 template <typename T>
 concept ContextFreeDrain = requires(T& operations) { operations.stopAndWait(); };
 static_assert(!ContextFreeDrain<AsyncOperations>);
+
+TEST(SingleUseEventContext, ForeignSenderDoesNotOutliveWaiterExecutionContext) {
+  for (int iteration = 0; iteration != 1024; ++iteration) {
+    SCOPED_TRACE(iteration);
+    servicelib::detail::SingleUseEvent event;
+    std::stop_source cancellation;
+    const auto context = servicelib::Context{}.withStopToken(cancellation.get_token());
+    std::thread sender;
+    {
+      asio::io_context io{1};
+      auto waiter = asio::co_spawn(io, event.AsyncWait(context), asio::use_future);
+      io.poll();  // Register the suspended waiter before the foreign completion.
+      sender = std::thread([&event] { event.Send(); });
+      if (iteration % 2 != 0) cancellation.request_stop();
+      io.run();
+      EXPECT_NO_THROW(waiter.get());
+      // The execution_context may be destroyed as soon as its waiter finishes,
+      // even if Send() is still returning on the producer thread.
+    }
+    sender.join();
+    EXPECT_TRUE(event.IsReady());
+  }
+}
 
 TEST(AsyncOperationsContext, ExpiredWaitPreservesAdmissionAndPhysicalOwnership) {
   for (int mode = 0; mode != 3; ++mode) {

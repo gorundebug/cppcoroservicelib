@@ -19,6 +19,7 @@
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -40,13 +41,36 @@ class SingleUseEvent final {
     virtual ~Waiter() = default;
     virtual void Wake() noexcept {}
   };
-  struct AsyncWaiter final : Waiter {
-    explicit AsyncWaiter(const std::shared_ptr<AsyncSignal>& value) : signal(value) {}
-    void Wake() noexcept override {
-      if (auto value = signal.lock())
-        static_cast<void>(value->try_send(boost::system::error_code{}));
+  struct AsyncNotification final {
+    explicit AsyncNotification(const std::shared_ptr<AsyncSignal>& value) : signal(value) {}
+    void Wake() noexcept {
+      std::lock_guard lock(mutex);
+      if (auto value = signal.lock()) {
+        const auto executor = value->get_executor();
+        // Transfer ownership to the waiter's executor before completing it.
+        // A foreign sender must not retain the final channel reference after
+        // the waiter returns and destroys its execution_context.
+        boost::asio::post(executor, [value = std::move(value)] {
+          static_cast<void>(value->try_send(boost::system::error_code{}));
+        });
+      }
     }
+    void Retire() noexcept {
+      std::lock_guard lock(mutex);
+      signal.reset();
+    }
+    std::mutex mutex;
     std::weak_ptr<AsyncSignal> signal;
+  };
+  struct AsyncWaiter final : Waiter {
+    explicit AsyncWaiter(std::shared_ptr<AsyncNotification> value)
+        : notification(std::move(value)) {}
+    void Wake() noexcept override { notification->Wake(); }
+    std::shared_ptr<AsyncNotification> notification;
+  };
+  struct RetireAsyncNotification final {
+    std::shared_ptr<AsyncNotification> notification;
+    ~RetireAsyncNotification() { notification->Retire(); }
   };
   struct SyncWaiter final : Waiter {
     explicit SyncWaiter(const std::shared_ptr<std::promise<void>>& value) : signal(value) {}
@@ -124,7 +148,9 @@ class SingleUseEvent final {
     if (context && context->cancelled()) co_return;
     const auto executor = co_await boost::asio::this_coro::executor;
     auto signal = std::make_shared<AsyncSignal>(executor, 1);
-    if (!Register(std::make_unique<AsyncWaiter>(signal))) co_return;
+    auto notification = std::make_shared<AsyncNotification>(signal);
+    if (!Register(std::make_unique<AsyncWaiter>(notification))) co_return;
+    const RetireAsyncNotification retirement{std::move(notification)};
     auto cancel = [signal] {
       static_cast<void>(signal->try_send(boost::system::error_code{}));
     };
