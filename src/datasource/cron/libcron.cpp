@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -28,6 +29,7 @@
 #include <boost/asio/use_awaitable.hpp>
 
 #include <servicelib/datasource/cron/libcron.hpp>
+#include <servicelib/datasource/cron/local_interval.hpp>
 #include <servicelib/runtime/config/dataconnector_types.hpp>
 #include <servicelib/runtime/config/endpoint_types.hpp>
 #include <servicelib/runtime/datasource.hpp>
@@ -129,19 +131,26 @@ struct Endpoint::Impl final {
 
   std::optional<std::string> configure() {
     const auto cfg = EndpointConfig(environment, endpointId);
+    interval.reset();
+    evaluator.reset();
     if (!cfg.enabled) return std::nullopt;
     if (cfg.timezone != "UTC") {
       throw std::invalid_argument("scheduled endpoint timezone must be UTC");
     }
     overlapPolicy = cfg.overlapPolicy;
     missedRunPolicy = cfg.missedRunPolicy;
-    const auto expression = ToLibcronExpression(cfg.schedule);
-    auto cronData = libcron::CronData::create(expression);
-    if (!cronData.is_valid()) {
-      throw std::invalid_argument("invalid cron schedule for endpoint " +
-                                  endpointName);
+    std::string expression;
+    if (const auto period = detail::ParseLocalInterval(cfg.schedule)) {
+      interval.emplace(*period, Clock::now());
+    } else {
+      expression = ToLibcronExpression(cfg.schedule);
+      auto cronData = libcron::CronData::create(expression);
+      if (!cronData.is_valid()) {
+        throw std::invalid_argument("invalid cron schedule for endpoint " +
+                                    endpointName);
+      }
+      evaluator.emplace(cronData);
     }
-    evaluator.emplace(cronData);
     lastScheduled.reset();
     {
       std::lock_guard lock(mutex);
@@ -166,7 +175,20 @@ struct Endpoint::Impl final {
       }
     }
     lastScheduled = scheduledAt;
-    if (due > 1 &&
+    dispatch(owner, scheduledAt, due > 1);
+  }
+
+  void fireInterval(const Context& owner, Clock::time_point now) {
+    if (!interval || owner.cancelled()) return;
+    if (const auto due = interval->takeDue(now)) {
+      dispatch(owner, due->scheduledAt, due->missed);
+    }
+  }
+
+  void dispatch(const Context& owner, Clock::time_point scheduledAt,
+                bool missed) {
+    if (owner.cancelled()) return;
+    if (missed &&
         missedRunPolicy == api::ScheduleMissedRunPolicy::kSkip) {
       return;
     }
@@ -240,6 +262,7 @@ struct Endpoint::Impl final {
   api::ScheduleMissedRunPolicy missedRunPolicy{
       api::ScheduleMissedRunPolicy::kSkip};
   std::optional<libcron::CronSchedule> evaluator;
+  std::optional<detail::LocalInterval> interval;
   std::optional<Clock::time_point> lastScheduled;
   std::mutex mutex;
   std::shared_ptr<servicelib::detail::SingleUseEvent> drained;
@@ -280,14 +303,26 @@ struct LibcronDataSource::Impl final {
         connectorId(connectorIdValue),
         connectorName(ConnectorConfig(environment, connectorId).name) {}
 
-  boost::asio::awaitable<void> tick() {
+  boost::asio::awaitable<void> tick(Context owner) {
     while (started.load(std::memory_order_acquire) && !stopping.load(std::memory_order_acquire)) {
-      timer->expires_after(std::chrono::milliseconds{500});
+      if (owner.cancelled()) co_return;
+      auto delay = std::chrono::milliseconds{500};
+      const auto now = Clock::now();
+      for (const auto& endpoint : endpoints) {
+        if (endpoint->impl_->interval) {
+          delay = std::min(delay, endpoint->impl_->interval->delay(now));
+        }
+      }
+      timer->expires_after(delay);
       boost::system::error_code error;
       co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
       if (error || !started.load(std::memory_order_acquire) || stopping.load(std::memory_order_acquire)) co_return;
       try {
         scheduler.tick();
+        const auto firedAt = Clock::now();
+        for (const auto& endpoint : endpoints) {
+          endpoint->impl_->fireInterval(owner, firedAt);
+        }
       } catch (const std::exception& exception) {
         try {
           environment.getLogger().error("cron scheduler tick failed", {log::Field::Err(exception)});
@@ -360,6 +395,7 @@ boost::asio::awaitable<void> LibcronDataSource::start(Context context) {
     for (const auto& endpoint : impl_->endpoints) {
       const auto expression = endpoint->impl_->configure();
       if (!expression) continue;
+      if (endpoint->impl_->interval) continue;
       if (!impl_->scheduler.add_schedule(
               endpoint->name(), *expression,
               [endpoint, context](const libcron::TaskInformation& information) {
@@ -372,7 +408,7 @@ boost::asio::awaitable<void> LibcronDataSource::start(Context context) {
     impl_->timer = std::make_shared<boost::asio::steady_timer>(
         boost::asio::make_strand(servicelib::detail::ParallelExecutorRegistry::Get()));
     impl_->tickDone = std::make_shared<servicelib::detail::SingleUseEvent>();
-    boost::asio::co_spawn(impl_->timer->get_executor(), impl_->tick(),
+    boost::asio::co_spawn(impl_->timer->get_executor(), impl_->tick(context),
         [done = impl_->tickDone](std::exception_ptr error) {
           done->Send();
           if (error) std::rethrow_exception(error);

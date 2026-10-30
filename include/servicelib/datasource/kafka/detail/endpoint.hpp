@@ -80,22 +80,28 @@ class EndpointState final {
       producerDone_ = std::make_shared<servicelib::detail::SingleUseEvent>();
       boost::asio::co_spawn(servicelib::detail::ParallelExecutorRegistry::Get(),
           [this, context]() -> boost::asio::awaitable<void> {
+            std::exception_ptr transportError;
             try {
               co_await producer_.start(context,
                   [this](MessageContext message, Payload<Input> value) {
                     return submit(std::move(message), std::move(value));
+                  }, [this](Context owner, std::exception_ptr error) {
+                    return reportError(std::move(owner), std::move(error));
                   });
             } catch (const std::exception& error) {
+              transportError = std::current_exception();
               try {
                 environment_.getLogger().error("datasource producer stopped",
                     {log::Field::Str("endpoint", endpointName_), log::Field::Err(error)});
               } catch (...) {}
             } catch (...) {
+              transportError = std::current_exception();
               try {
                 environment_.getLogger().error("datasource producer stopped with an unknown error",
                     {log::Field::Str("endpoint", endpointName_)});
               } catch (...) {}
             }
+            if (transportError) co_await reportError(context, transportError);
           }, [done = producerDone_](std::exception_ptr error) {
             done->Send();
             if (error) std::rethrow_exception(error);
@@ -200,6 +206,17 @@ class EndpointState final {
   }
 
  private:
+  boost::asio::awaitable<void> reportError(Context context, std::exception_ptr error) {
+    if (context.cancelled() || requestStopSource_.stop_requested()) co_return;
+    try {
+      co_await handler_->onError(MessageContext{context}, streamContext_, error);
+    } catch (...) {
+      // Reporting must not silently change the driver's existing retry policy.
+      environment_.getLogger().error("Kafka onError callback failed",
+          {log::Field::Str("endpoint", endpointName_)});
+    }
+  }
+
   boost::asio::awaitable<void> submit(MessageContext context, Payload<Input> payload) {
     if (!co_await acquire()) co_return;
     // Finish this message before returning to the Kafka partition consumer.

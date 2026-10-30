@@ -81,8 +81,9 @@ class ConsumerMessage final {
 class ConsumerClient {
  public:
   using Callback = std::function<void(ConsumerMessage)>;
+  using ErrorCallback = std::function<void(std::exception_ptr)>;
   virtual ~ConsumerClient() = default;
-  virtual void start(Callback callback) = 0;
+  virtual void start(Callback callback, ErrorCallback onError) = 0;
   virtual void stop() noexcept = 0;
 };
 
@@ -97,7 +98,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
     if (consumer_) rd_kafka_consumer_close(consumer_.get());
   }
 
-  void start(Callback callback) override {
+  void start(Callback callback, ErrorCallback onError) override {
     initialize();
     bool expected = false;
     if (!started_.compare_exchange_strong(expected, true,
@@ -112,7 +113,13 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
         if (!message) continue;
         if (message->err == RD_KAFKA_RESP_ERR__PARTITION_EOF) continue;
         if (message->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-          if (IsTransientError(message->err)) continue;
+          if (IsTransientError(message->err)) {
+            environment_.getLogger().error("Kafka transient consume error",
+                {log::Field::Str("error", rd_kafka_err2str(message->err))});
+            onError(std::make_exception_ptr(std::runtime_error(
+                std::string{"Kafka consume: "} + rd_kafka_err2str(message->err))));
+            continue;
+          }
           throw std::runtime_error(std::string{"Kafka consume: "} +
                                    rd_kafka_err2str(message->err));
         }
@@ -214,6 +221,8 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
       SetConfig(kafkaConfig, "bootstrap.servers", connector->brokers);
       servicelib::detail::ApplyKafkaSecurity(kafkaConfig, *connector);
       SetConfig(kafkaConfig, "group.id", endpoint->consumerGroup);
+      // Ordinary inputs must never expose aborted transactional messages.
+      SetConfig(kafkaConfig, "isolation.level", "read_committed");
       SetConfig(kafkaConfig, "enable.auto.commit", "true");
       SetConfig(kafkaConfig, "enable.auto.offset.store", "false");
       SetConfig(kafkaConfig, "auto.offset.reset", "earliest");
@@ -467,10 +476,11 @@ namespace detail {
 class ProducerAdapter final {
  public:
   using Consumer = std::function<boost::asio::awaitable<void>(MessageContext, Payload<ConsumerMessage>)>;
+  using ErrorConsumer = std::function<boost::asio::awaitable<void>(Context, std::exception_ptr)>;
   ProducerAdapter(ConsumerClient& client, IServiceEnvironment& environment)
       : client_(client), tracingEnabled_(environment.getTracing() != nullptr) {}
 
-  boost::asio::awaitable<void> start(Context context, Consumer consumer) {
+  boost::asio::awaitable<void> start(Context context, Consumer consumer, ErrorConsumer onError) {
     co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
     struct Completion final {
       servicelib::detail::SingleUseEvent done;
@@ -482,7 +492,7 @@ class ProducerAdapter final {
     // thread and its partition lanes may wait on futures, never Asio workers.
     std::thread polling([client = &client_, tracingEnabled = tracingEnabled_,
                          owner = std::move(context),
-                         consumer = std::move(consumer), executor, completion] {
+                         consumer = std::move(consumer), onError = std::move(onError), executor, completion] {
       try {
         client->start([owner, tracingEnabled, consumer, executor](ConsumerMessage message) {
           auto context = servicelib::detail::ContextFromKafkaHeaders(
@@ -490,6 +500,9 @@ class ProducerAdapter final {
           boost::asio::co_spawn(executor,
               consumer(std::move(context), Payload<ConsumerMessage>::make(std::move(message))),
               boost::asio::use_future).get();
+        }, [owner, onError, executor](std::exception_ptr error) {
+          boost::asio::co_spawn(executor, onError(owner, std::move(error)),
+                               boost::asio::use_future).get();
         });
       } catch (...) {
         completion->error = std::current_exception();
@@ -517,6 +530,11 @@ class HandlerAdapter final {
 
   int concurrency(SourceStreamContext<T, R, E>& context) {
     return handler_.concurrency(context);
+  }
+  boost::asio::awaitable<void> onError(
+      MessageContext context, SourceStreamContext<T, R, E>& stream,
+      std::exception_ptr error) {
+    return handler_.onError(std::move(context), stream, std::move(error));
   }
   boost::asio::awaitable<BeginResult<State>> beginRequest(MessageContext context,
                                   SourceStreamContext<T, R, E>& stream) {

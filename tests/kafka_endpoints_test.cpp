@@ -8,6 +8,7 @@
 #include <servicelib/runtime/testlog/testlog.hpp>
 #include <servicelib/runtime/testmetrics/testmetrics.hpp>
 #include <servicelib/runtime/testtracing/testtracing.hpp>
+#include <servicelib/transformation/streams.hpp>
 
 #include "test_sink_endpoint_stream.hpp"
 #include "test_async.hpp"
@@ -21,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <future>
@@ -728,7 +730,7 @@ TEST(KafkaDataSink, PassesAsyncDeliveryFailureToCallback) {
 class FakeKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
-  void start(Callback callback) override {
+  void start(Callback callback, ErrorCallback) override {
     callback(servicelib::datasource::kafka::ConsumerMessage{
         "key", "payload", "events", 2, 9, [this]() -> boost::asio::awaitable<void> { committed = true; co_return; }, {}, headers});
   }
@@ -759,6 +761,10 @@ TEST(KafkaDataSource, ExposesCommitAndMarkMessageOperations) {
 }
 
 struct KafkaSourceHandler final {
+  boost::asio::awaitable<void> onError(servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
+    co_await stream.collectError(std::move(context), std::move(error));
+  }
+
   using State = int;
   test_async::Event* done;
   std::string* observed;
@@ -809,10 +815,12 @@ class TestKafkaInput final {
   boost::asio::awaitable<void> consume(servicelib::MessageContext, servicelib::Payload<T>) {
     co_return;
   }
-  boost::asio::awaitable<void> consumeError(servicelib::MessageContext,
-                    servicelib::Payload<std::exception_ptr>) {
+  boost::asio::awaitable<void> consumeError(servicelib::MessageContext context,
+                    servicelib::Payload<std::exception_ptr> error) {
+    if (errorObserver) errorObserver(std::move(context), error.get());
     co_return;
   }
+  std::function<void(servicelib::MessageContext, std::exception_ptr)> errorObserver;
 
  private:
   bool has_result_;
@@ -834,6 +842,87 @@ TEST(KafkaDataSource, CopiesRecordAndExposesCommit) {
   runKafka(endpoint->stop(servicelib::Context{}));
   EXPECT_EQ(observed, "events:key:payload");
   EXPECT_TRUE(consumer.committed.load());
+}
+
+class ReportingKafkaConsumer final
+    : public servicelib::datasource::kafka::ConsumerClient {
+ public:
+  explicit ReportingKafkaConsumer(bool terminal) : terminal_(terminal) {}
+  void start(Callback, ErrorCallback onError) override {
+    if (terminal_) throw std::runtime_error("transport failed before message");
+    onError(std::make_exception_ptr(std::runtime_error("transport failed before message")));
+    returned.store(true);
+  }
+  void stop() noexcept override {}
+  std::atomic<bool> returned{false};
+ private:
+  bool terminal_;
+};
+
+struct ErrorOnlyKafkaHandler final {
+  using State = int;
+  std::atomic<int>* messageCalls;
+  int concurrency(auto&) { return 1; }
+  boost::asio::awaitable<void> onError(
+      servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
+    co_await stream.collectError(std::move(context), std::move(error));
+  }
+  boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
+      servicelib::MessageContext context, auto&) {
+    ++*messageCalls;
+    co_return servicelib::BeginResult<State>{std::move(context), 0};
+  }
+  boost::asio::awaitable<void> consumeMessage(
+      servicelib::MessageContext, auto&, State&,
+      const servicelib::datasource::kafka::ConsumerMessage&, auto) {
+    ++*messageCalls;
+    co_return;
+  }
+  boost::asio::awaitable<std::string> getMessageId(
+      servicelib::MessageContext, auto&, State&, const int&) {
+    ++*messageCalls;
+    co_return std::string{};
+  }
+  boost::asio::awaitable<void> endRequest(
+      servicelib::MessageContext, auto&, std::exception_ptr, State&) {
+    ++*messageCalls;
+    co_return;
+  }
+};
+
+TEST(KafkaDataSource, ReportsTransportErrorWithoutCreatingMessageState) {
+  test_async::AsioRuntime runtime;
+  for (const bool terminal : {false, true}) {
+    SCOPED_TRACE(terminal);
+    TestEnvironment environment;
+    ReportingKafkaConsumer consumer{terminal};
+    TestKafkaInput<std::string, int> input{false};
+    test_async::Event reported;
+    std::atomic<int> messageCalls{0};
+    std::atomic<int> errorCalls{0};
+    std::stop_source cancellation;
+    const auto owner = servicelib::Context{}.withStopToken(cancellation.get_token());
+    input.errorObserver = [&](servicelib::MessageContext context, std::exception_ptr error) {
+      EXPECT_EQ(context.stopToken(), cancellation.get_token());
+      EXPECT_FALSE(context.cancelled());
+      try {
+        std::rethrow_exception(error);
+      } catch (const std::runtime_error& failure) {
+        EXPECT_EQ(std::string{failure.what()}, "transport failed before message");
+      }
+      ++errorCalls;
+      reported.Send();
+    };
+    auto endpoint = servicelib::datasource::kafka::Endpoint<
+        std::string, int, ErrorOnlyKafkaHandler>::make(
+        environment, input, consumer, ErrorOnlyKafkaHandler{&messageCalls});
+    runKafka(endpoint->start(owner));
+    EXPECT_TRUE(reported.WaitForEvent());
+    runKafka(endpoint->stop(owner));
+    EXPECT_EQ(errorCalls.load(), 1);
+    EXPECT_EQ(messageCalls.load(), 0);
+    EXPECT_EQ(consumer.returned.load(), !terminal);
+  }
 }
 
 class CorrelatedKafkaInput final {
@@ -861,6 +950,10 @@ class CorrelatedKafkaInput final {
 };
 
 struct CorrelatedKafkaHandler final {
+  boost::asio::awaitable<void> onError(servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
+    co_await stream.collectError(std::move(context), std::move(error));
+  }
+
   using State = int;
   test_async::Event* done;
   std::vector<std::string>* events;
@@ -934,6 +1027,10 @@ TEST(KafkaDataSource, RetainsCallbackAndRejectsResultsAfterCompletion) {
 }
 
 struct WaitingKafkaSourceHandler final {
+  boost::asio::awaitable<void> onError(servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
+    co_await stream.collectError(std::move(context), std::move(error));
+  }
+
   using State = int;
   test_async::Event* entered;
   test_async::Event* ended;
@@ -989,7 +1086,7 @@ struct DelayedKafkaSourceProbe final {
 class DelayedKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
-  void start(Callback callback) override {
+  void start(Callback callback, ErrorCallback) override {
     callback(servicelib::datasource::kafka::ConsumerMessage{
         "key", "delayed", "events", 0, 1});
     returned.store(true, std::memory_order_release);
@@ -1002,6 +1099,10 @@ class DelayedKafkaConsumer final
 };
 
 struct DelayedKafkaSourceHandler final {
+  boost::asio::awaitable<void> onError(servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
+    co_await stream.collectError(std::move(context), std::move(error));
+  }
+
   using State = int;
   std::shared_ptr<DelayedKafkaSourceProbe> probe;
   std::shared_ptr<int> lifetime;
@@ -1145,7 +1246,7 @@ TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {
             runKafka(message.commit());
             received.Send();
             consumer.stop();
-          });
+          }, [](std::exception_ptr) {});
     } catch (...) {
       consumerError = std::current_exception();
       received.Send();
@@ -1224,7 +1325,7 @@ TEST(LibrdkafkaClients, PreservesPartitionOrderAndRunsPartitionsConcurrently) {
               }
             }
             changed.notify_all();
-          });
+          }, [](std::exception_ptr) {});
     } catch (...) {
       consumerError = std::current_exception();
       completed.Send();
@@ -1330,7 +1431,7 @@ TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
   std::exception_ptr consumerError;
   std::thread consumerThread{[&] {
     try {
-      unavailableConsumer.start([](auto) {});
+      unavailableConsumer.start([](auto) {}, [](std::exception_ptr) {});
     } catch (...) {
       consumerError = std::current_exception();
     }
@@ -1344,3 +1445,5 @@ TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
 }
 
 }  // namespace
+
+#include "kafka_transaction_visibility_test.hpp"
