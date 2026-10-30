@@ -309,10 +309,18 @@ void rollsBackStartedComponents() {
   failingSink->failStop = false;
   runLifecycle(lifecycle.finishShutdown(servicelib::Context{}));
   Require(!lifecycle.hasPendingShutdown());
-  Require((events.snapshot() == std::vector<std::string>{
+  const auto stopped = events.snapshot();
+  const std::vector<std::string> stoppedPrefix{
       "storage:start", "sink:start", "failing-sink:start", "source:start",
-      "source:stop", "storage:stop", "storage:stop", "failing-sink:stop",
-      "sink:stop", "failing-sink:stop"}));
+      "source:stop", "storage:stop", "storage:stop"};
+  Require(stopped.size() == stoppedPrefix.size() + 3);
+  Require(std::equal(stoppedPrefix.begin(), stoppedPrefix.end(), stopped.begin()));
+  // Siblings in one shutdown phase run concurrently; only phase ordering,
+  // successful-sibling deduplication and failed-sibling retries are contractual.
+  auto sinkPhase = std::vector<std::string>(stopped.begin() + 7, stopped.begin() + 9);
+  std::sort(sinkPhase.begin(), sinkPhase.end());
+  Require((sinkPhase == std::vector<std::string>{"failing-sink:stop", "sink:stop"}));
+  Require(stopped.back() == "failing-sink:stop");
   const auto completed = events.snapshot();
   runLifecycle(lifecycle.stop(servicelib::Context{}));
   Require(events.snapshot() == completed);

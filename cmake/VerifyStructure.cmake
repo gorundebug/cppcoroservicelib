@@ -19,6 +19,8 @@ set(_omitted_userver_boundaries
     datasource/kafka/userver.hpp
     datasource/localsource/custom.hpp
     runtime/config/component.hpp
+    runtime/detail/context_wait.hpp
+    runtime/process_shutdown.hpp
     runtime/pool/userver_aliases.hpp
     runtime/telemetry/userver/log.hpp
     runtime/telemetry/userver/metrics.hpp
