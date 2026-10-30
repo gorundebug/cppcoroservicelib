@@ -12,6 +12,7 @@ datasink/kafka/userver.hpp
 datasink/localsink/custom.hpp
 datasource/cron/libcron.hpp
 datasource/cron/local_interval.hpp
+datasource/detail/request_admission.hpp
 datasource/detail/result_context.hpp
 datasource/grpc/bidistreaming.hpp
 datasource/grpc/clientstreaming.hpp

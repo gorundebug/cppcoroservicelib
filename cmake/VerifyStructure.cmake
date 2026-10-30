@@ -14,6 +14,7 @@ set(_omitted_userver_boundaries
     datasink/grpc/userver.hpp
     datasink/http/userver.hpp
     datasink/kafka/userver.hpp
+    datasource/detail/request_admission.hpp
     datasource/grpc/userver.hpp
     datasource/http/userver.hpp
     datasource/kafka/userver.hpp
