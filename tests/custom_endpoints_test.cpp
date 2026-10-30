@@ -289,6 +289,17 @@ class DuplicateSourceProducer final
     : public servicelib::datasource::localsource::DataProducer<std::string> {
  public:
   explicit DuplicateSourceProducer(DuplicateSourceProbe& probe) : probe_(probe) {}
+  template <typename OnError>
+  boost::asio::awaitable<void> start(servicelib::Context context, Consumer consumer,
+                                    OnError onError) {
+    std::exception_ptr failure;
+    try {
+      co_await start(context, std::move(consumer));
+    } catch (...) {
+      failure = std::current_exception();
+    }
+    if (failure) co_await onError(context, failure);
+  }
   boost::asio::awaitable<void> start(servicelib::Context, Consumer consumer) override {
 const auto context = servicelib::MessageContext{}.withStreamId("source-collision");
 servicelib::detail::SingleUseEvent firstDone;
@@ -318,6 +329,11 @@ probe_.reuseReturned.Send();
 struct DuplicateSourceHandler final {
   using State = int;
   DuplicateSourceProbe* probe;
+  boost::asio::awaitable<void> onError(servicelib::MessageContext, auto&,
+                                      std::exception_ptr error) {
+    EXPECT_FALSE(error) << "unexpected producer error in duplicate-result test";
+    co_return;
+  }
   int concurrency(auto&) { return 0; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(servicelib::MessageContext context, auto&) {
     co_return servicelib::BeginResult<State>{std::move(context), ++probe->begins};
