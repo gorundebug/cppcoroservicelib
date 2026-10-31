@@ -5,9 +5,13 @@ root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 source "$root/scripts/dependency-proxy-env.sh"
 image=${CPPCOROSERVICELIB_CONAN_IMAGE:-cppcoroservicelib-conan-build}
 build_type=${1:-Debug}
+mkdir -p "$root/build"
+build_root="$(CDPATH= cd -- "$root/build" && pwd -P)"
 
 docker_build_args=()
-docker_run_args=()
+# Profile workspaces may symlink their ignored host cache outside the source
+# bind mount. Mount its resolved directory for both CTest and the DNS probe.
+docker_run_args=(-v "$build_root:/workspace/build")
 conan_home_mount=cppcoroservicelib-conan2:/conan
 docker_build_args+=(
   --build-arg "DEPENDENCY_DOCKER_REGISTRY=${DEPENDENCY_DOCKER_REGISTRY:-docker.io}"
