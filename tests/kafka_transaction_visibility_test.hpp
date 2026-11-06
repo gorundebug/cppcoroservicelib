@@ -71,6 +71,8 @@ class VisibilityProducer final {
 struct VisibilityHandler final {
   using State = int;
   std::atomic<unsigned>* errors;
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 2; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
       servicelib::MessageContext context, auto&) {

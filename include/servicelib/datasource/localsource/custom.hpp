@@ -167,6 +167,7 @@ class Endpoint final : public IEndpoint {
   [[nodiscard]] int id() const noexcept override { return endpointId_; }
 
   boost::asio::awaitable<void> start(Context context) override {
+    if (!endpointConfig(environment_, endpointId_).enabled) co_return;
     bool expected = false;
     if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
       throw std::logic_error("custom datasource endpoint already started");

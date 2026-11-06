@@ -43,9 +43,15 @@ void runKafka(boost::asio::awaitable<void> operation) {
                        std::move(operation), boost::asio::use_future).get();
 }
 
-class MockKafkaCluster final {
+class KafkaTestCluster final {
  public:
-  MockKafkaCluster() {
+  explicit KafkaTestCluster(bool allowNative = false) {
+    if (allowNative) {
+      if (const auto* brokers = std::getenv("SA_TEST_KAFKA_BROKERS")) {
+        nativeBrokers_ = brokers;
+        return;
+      }
+    }
     char error[512]{};
     handle_ = rd_kafka_new(RD_KAFKA_PRODUCER, rd_kafka_conf_new(), error,
                            sizeof(error));
@@ -54,16 +60,29 @@ class MockKafkaCluster final {
     if (!cluster_) throw std::runtime_error("failed to create mock cluster");
   }
 
-  ~MockKafkaCluster() {
+  ~KafkaTestCluster() {
     if (cluster_) rd_kafka_mock_cluster_destroy(cluster_);
     if (handle_) rd_kafka_destroy(handle_);
   }
 
   [[nodiscard]] std::string brokers() const {
+    if (!nativeBrokers_.empty()) return nativeBrokers_;
     return rd_kafka_mock_cluster_bootstraps(cluster_);
   }
 
   void createTopic(const std::string& topic, int partitions = 1) {
+    if (!nativeBrokers_.empty()) {
+      servicelib::config::KafkaDataConnectorConfig connector;
+      connector.brokers = nativeBrokers_;
+      servicelib::config::KafkaEndpointConfig endpoint;
+      endpoint.enabled = true;
+      endpoint.createTopic = true;
+      endpoint.topic = topic;
+      endpoint.partitions = partitions;
+      endpoint.replicationFactor = 1;
+      servicelib::detail::EnsureKafkaTopic(connector, endpoint);
+      return;
+    }
     const auto status = rd_kafka_mock_topic_create(
         cluster_, topic.c_str(), partitions, 1);
     if (status != RD_KAFKA_RESP_ERR_NO_ERROR) {
@@ -72,6 +91,7 @@ class MockKafkaCluster final {
   }
 
   void setGroupCoordinator(const std::string& group) {
+    if (!nativeBrokers_.empty()) return;
     const auto status = rd_kafka_mock_coordinator_set(
         cluster_, "group", group.c_str(), 1);
     if (status != RD_KAFKA_RESP_ERR_NO_ERROR) {
@@ -94,6 +114,7 @@ class MockKafkaCluster final {
   }
 
  private:
+  std::string nativeBrokers_;
   rd_kafka_t* handle_{};
   rd_kafka_mock_cluster_t* cluster_{};
 };
@@ -730,7 +751,7 @@ TEST(KafkaDataSink, PassesAsyncDeliveryFailureToCallback) {
 class FakeKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
-  void start(Callback callback, ErrorCallback) override {
+  void start(servicelib::Context, servicelib::datasource::kafka::RestoreCheckpoint, Callback callback, ErrorCallback) override {
     callback(servicelib::datasource::kafka::ConsumerMessage{
         "key", "payload", "events", 2, 9, [this]() -> boost::asio::awaitable<void> { committed = true; co_return; }, {}, headers});
   }
@@ -768,6 +789,8 @@ struct KafkaSourceHandler final {
   using State = int;
   test_async::Event* done;
   std::string* observed;
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 1; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
       servicelib::MessageContext context, auto&) {
@@ -848,7 +871,7 @@ class ReportingKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
   explicit ReportingKafkaConsumer(bool terminal) : terminal_(terminal) {}
-  void start(Callback, ErrorCallback onError) override {
+  void start(servicelib::Context, servicelib::datasource::kafka::RestoreCheckpoint, Callback, ErrorCallback onError) override {
     if (terminal_) throw std::runtime_error("transport failed before message");
     onError(std::make_exception_ptr(std::runtime_error("transport failed before message")));
     returned.store(true);
@@ -862,6 +885,8 @@ class ReportingKafkaConsumer final
 struct ErrorOnlyKafkaHandler final {
   using State = int;
   std::atomic<int>* messageCalls;
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 1; }
   boost::asio::awaitable<void> onError(
       servicelib::MessageContext context, auto& stream, std::exception_ptr error) {
@@ -957,6 +982,8 @@ struct CorrelatedKafkaHandler final {
   using State = int;
   test_async::Event* done;
   std::vector<std::string>* events;
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 1; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(servicelib::MessageContext context,
                                              auto&) {
@@ -1034,6 +1061,8 @@ struct WaitingKafkaSourceHandler final {
   using State = int;
   test_async::Event* entered;
   test_async::Event* ended;
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 1; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
       servicelib::MessageContext context, auto&) {
@@ -1086,7 +1115,7 @@ struct DelayedKafkaSourceProbe final {
 class DelayedKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
-  void start(Callback callback, ErrorCallback) override {
+  void start(servicelib::Context, servicelib::datasource::kafka::RestoreCheckpoint, Callback callback, ErrorCallback) override {
     callback(servicelib::datasource::kafka::ConsumerMessage{
         "key", "delayed", "events", 0, 1});
     returned.store(true, std::memory_order_release);
@@ -1107,6 +1136,8 @@ struct DelayedKafkaSourceHandler final {
   std::shared_ptr<DelayedKafkaSourceProbe> probe;
   std::shared_ptr<int> lifetime;
 
+  std::optional<servicelib::datasource::kafka::CheckpointOffsets> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   int concurrency(auto&) { return 1; }
   boost::asio::awaitable<servicelib::BeginResult<State>> beginRequest(
       servicelib::MessageContext context, auto&) {
@@ -1210,7 +1241,7 @@ TEST(KafkaDataSource, InterruptedShutdownRetainsHandlerAndCanBeRetried) {
 TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {
   test_async::AsioRuntime runtime;
   using namespace std::chrono_literals;
-  MockKafkaCluster cluster;
+  KafkaTestCluster cluster;
   cluster.createTopic("events");
   servicelib::config::KafkaDataConnectorConfig connector;
   connector.brokers = cluster.brokers();
@@ -1240,7 +1271,7 @@ TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {
   std::exception_ptr consumerError;
   std::thread consumerThread{[&] {
     try {
-      consumer.start(
+      consumer.start(servicelib::Context{}, [] { return std::optional<servicelib::datasource::kafka::CheckpointOffsets>{}; },
           [&](servicelib::datasource::kafka::ConsumerMessage message) {
             observed = message.key() + ":" + message.value();
             runKafka(message.commit());
@@ -1270,10 +1301,220 @@ TEST(LibrdkafkaClients, ProduceConsumeAndCommitAgainstBrokerProtocol) {
   EXPECT_EQ(observed, "first-key:first-value");
 }
 
+// Native broker-protocol assignment tests. In particular, a previously
+// committed group position must not override an application's durable image.
+TEST(LibrdkafkaClients, RestoresCheckpointInsteadOfCommittedGroupAndRejectsStaleAck) {
+  // The protocol mock does not complete the repeated membership transitions
+  // exercised here. Verify group ownership against an actual broker.
+  if (!std::getenv("SA_TEST_KAFKA_BROKERS"))
+    GTEST_SKIP() << "set SA_TEST_KAFKA_BROKERS for checkpoint group acceptance";
+  test_async::AsioRuntime runtime;
+  using namespace std::chrono_literals;
+  using servicelib::datasource::kafka::CheckpointOffsets;
+  using servicelib::datasource::kafka::ConsumerMessage;
+  KafkaTestCluster cluster{true};
+  const auto topic = "sa-coro-checkpoint-" + std::to_string(
+      std::chrono::system_clock::now().time_since_epoch().count());
+  cluster.createTopic(topic);
+  cluster.setGroupCoordinator(topic);
+  TestEnvironment environment;
+  environment.config().kafkaConnector.brokers = cluster.brokers();
+  environment.config().kafkaEndpoint.topic = topic;
+  environment.config().kafkaEndpoint.consumerGroup = topic;
+  servicelib::datasink::kafka::LibrdkafkaProducerClient producer{
+      servicelib::metrics::NoopMetrics::instance()};
+  producer.start(environment.config().kafkaConnector);
+  std::vector<std::int64_t> offsets;
+  for (int i = 0; i < 6; ++i) {
+    auto delivery = producer.send(topic, "key", std::to_string(i), 0);
+    ASSERT_FALSE(delivery.error);
+    ASSERT_TRUE(delivery.offset.has_value());
+    offsets.push_back(*delivery.offset);
+  }
+  // Commit a later record, then restore an earlier snapshot in the same group,
+  // then advance to a newer snapshot. Test both directions independently.
+  for (const std::size_t selected : {std::size_t{4}, std::size_t{1}, std::size_t{5}}) {
+    servicelib::datasource::kafka::LibrdkafkaConsumerClient consumer{
+        environment, environment.config().kafkaEndpoint.id};
+    std::optional<ConsumerMessage> retained;
+    test_async::Event done;
+    std::exception_ptr failure;
+    std::atomic<int> restorationCalls{0};
+    std::thread polling([&] {
+      try {
+        consumer.start(servicelib::Context{}, [&]() -> std::optional<CheckpointOffsets> {
+          ++restorationCalls;
+          return CheckpointOffsets{{0, offsets[selected]}};
+        }, [&](ConsumerMessage message) {
+          retained = message;
+          runKafka(message.commit());
+          consumer.stop();
+          done.Send();
+        }, [](std::exception_ptr) {});
+      } catch (...) { failure = std::current_exception(); done.Send(); }
+    });
+    const bool completed = done.WaitForEventFor(15s);
+    consumer.stop();
+    polling.join();
+    if (failure) std::rethrow_exception(failure);
+    ASSERT_TRUE(completed) << "selected=" << selected
+        << " restore calls=" << restorationCalls.load()
+        << " delivered=" << retained.has_value();
+    ASSERT_TRUE(retained.has_value());
+    EXPECT_EQ(retained->offset(), offsets[selected]);
+    EXPECT_EQ(retained->value(), std::to_string(selected));
+    EXPECT_GE(restorationCalls.load(), 2); // initial mode and actual assignment
+    EXPECT_TRUE(retained->assignmentToken().stop_requested());
+    EXPECT_THROW(runKafka(retained->commit()), std::runtime_error);
+    EXPECT_THROW(retained->markMessage(), std::runtime_error);
+  }
+}
+
+TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
+  // The protocol mock does not complete the repeated membership transitions
+  // exercised here. Verify group ownership against an actual broker.
+  if (!std::getenv("SA_TEST_KAFKA_BROKERS"))
+    GTEST_SKIP() << "set SA_TEST_KAFKA_BROKERS for checkpoint group acceptance";
+  test_async::AsioRuntime runtime;
+  using namespace std::chrono_literals;
+  using servicelib::datasource::kafka::CheckpointOffsets;
+  using servicelib::datasource::kafka::ConsumerMessage;
+  KafkaTestCluster cluster{true};
+  const auto topic = "sa-coro-checkpoint-" + std::to_string(
+      std::chrono::system_clock::now().time_since_epoch().count());
+  cluster.createTopic(topic, 2);
+  cluster.setGroupCoordinator(topic);
+  TestEnvironment environment;
+  environment.config().kafkaConnector.brokers = cluster.brokers();
+  environment.config().kafkaEndpoint.topic = topic;
+  environment.config().kafkaEndpoint.consumerGroup = topic;
+  servicelib::datasink::kafka::LibrdkafkaProducerClient producer{
+      servicelib::metrics::NoopMetrics::instance()};
+  producer.start(environment.config().kafkaConnector);
+  CheckpointOffsets checkpoint;
+  for (int partition = 0; partition < 2; ++partition) {
+    const auto old = producer.send(topic, "old", "before-image", partition);
+    const auto next = producer.send(topic, "next", "after-image", partition);
+    ASSERT_FALSE(old.error);
+    ASSERT_FALSE(next.error);
+    ASSERT_TRUE(next.offset.has_value());
+    checkpoint[partition] = *next.offset;
+  }
+  servicelib::datasource::kafka::LibrdkafkaConsumerClient first{environment, environment.config().kafkaEndpoint.id};
+  servicelib::datasource::kafka::LibrdkafkaConsumerClient second{environment, environment.config().kafkaEndpoint.id};
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::map<std::uint32_t, ConsumerMessage> firstMessages;
+  std::optional<ConsumerMessage> secondMessage;
+  std::exception_ptr firstFailure, secondFailure;
+  const auto restore = [&]() -> std::optional<CheckpointOffsets> { return checkpoint; };
+  std::thread firstThread([&] {
+    try {
+      first.start(servicelib::Context{}, restore, [&](ConsumerMessage message) {
+        std::lock_guard lock(mutex);
+        firstMessages.insert_or_assign(message.partition(), message);
+        changed.notify_all();
+      }, [](std::exception_ptr) {});
+    } catch (...) { std::lock_guard lock(mutex); firstFailure = std::current_exception(); changed.notify_all(); }
+  });
+  bool firstOwnsBoth;
+  {
+    std::unique_lock lock(mutex);
+    changed.wait_for(lock, 15s, [&] { return firstMessages.size() == 2 || firstFailure; });
+    firstOwnsBoth = firstMessages.size() == 2;
+  }
+  std::thread secondThread([&] {
+    try {
+      second.start(servicelib::Context{}, restore, [&](ConsumerMessage message) {
+        std::lock_guard lock(mutex);
+        secondMessage = message;
+        changed.notify_all();
+      }, [](std::exception_ptr) {});
+    } catch (...) { std::lock_guard lock(mutex); secondFailure = std::current_exception(); changed.notify_all(); }
+  });
+  bool transferred = false;
+  bool revoked = false;
+  std::optional<ConsumerMessage> stale;
+  {
+    std::unique_lock lock(mutex);
+    changed.wait_for(lock, 20s, [&] { return secondMessage.has_value() || secondFailure; });
+    if (secondMessage) {
+      transferred = secondMessage->offset() == checkpoint.at(static_cast<std::int32_t>(secondMessage->partition())) &&
+                    secondMessage->value() == "after-image";
+      auto previous = firstMessages.find(secondMessage->partition());
+      if (previous != firstMessages.end()) {
+        stale = previous->second;
+        revoked = stale->assignmentToken().stop_requested();
+      }
+    }
+  }
+  // Exercise stale ACK while the first native consumer is still alive; a mere
+  // destruction check would miss mutation of a later group generation.
+  bool staleAckRejected = false;
+  if (stale) {
+    try { runKafka(stale->commit()); }
+    catch (const std::runtime_error&) { staleAckRejected = true; }
+  }
+  first.stop();
+  second.stop();
+  firstThread.join();
+  secondThread.join();
+  EXPECT_TRUE(firstOwnsBoth);
+  EXPECT_TRUE(transferred);
+  EXPECT_TRUE(revoked);
+  EXPECT_TRUE(staleAckRejected);
+  if (firstFailure) std::rethrow_exception(firstFailure);
+  if (secondFailure) std::rethrow_exception(secondFailure);
+}
+
+TEST(LibrdkafkaClients, CheckpointFailureNeverFallsBackToEarliest) {
+  test_async::AsioRuntime runtime;
+  using namespace std::chrono_literals;
+  using servicelib::datasource::kafka::CheckpointOffsets;
+  KafkaTestCluster cluster;
+  cluster.createTopic("events");
+  TestEnvironment environment;
+  environment.config().kafkaConnector.brokers = cluster.brokers();
+  environment.config().kafkaEndpoint.topic = "events";
+  servicelib::datasink::kafka::LibrdkafkaProducerClient producer{
+      servicelib::metrics::NoopMetrics::instance()};
+  producer.start(environment.config().kafkaConnector);
+  ASSERT_FALSE(producer.send("events", "key", "must-not-deliver", 0).error);
+  for (const int mode : {0, 1, 2, 3}) {
+    environment.config().kafkaEndpoint.consumerGroup = "checkpoint-invalid-" + std::to_string(mode);
+    cluster.setGroupCoordinator(environment.config().kafkaEndpoint.consumerGroup);
+    servicelib::datasource::kafka::LibrdkafkaConsumerClient consumer{
+        environment, environment.config().kafkaEndpoint.id};
+    test_async::Event done;
+    std::exception_ptr failure;
+    std::atomic<int> delivered{0};
+    std::atomic<int> calls{0};
+    std::thread polling([&] {
+      try {
+        consumer.start(servicelib::Context{}, [&]() -> std::optional<CheckpointOffsets> {
+          const int invocation = ++calls;
+          if (mode == 0) return CheckpointOffsets{}; // missing assigned partition
+          if (mode == 1) return CheckpointOffsets{{0, 1000000}}; // beyond log end
+          if (mode == 2) return CheckpointOffsets{{0, -1}};
+          if (invocation > 1) return std::nullopt; // mode must not change
+          return CheckpointOffsets{{0, 0}};
+        }, [&](auto) { ++delivered; consumer.stop(); done.Send(); }, [](std::exception_ptr) {});
+      } catch (...) { failure = std::current_exception(); }
+      done.Send();
+    });
+    const bool completed = done.WaitForEventFor(15s);
+    consumer.stop();
+    polling.join();
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(failure != nullptr);
+    EXPECT_EQ(delivered.load(), 0);
+  }
+}
+
 TEST(LibrdkafkaClients, PreservesPartitionOrderAndRunsPartitionsConcurrently) {
   test_async::AsioRuntime runtime;
   using namespace std::chrono_literals;
-  MockKafkaCluster cluster;
+  KafkaTestCluster cluster;
   cluster.createTopic("events", 2);
   servicelib::config::KafkaDataConnectorConfig connector;
   connector.brokers = cluster.brokers();
@@ -1306,7 +1547,7 @@ TEST(LibrdkafkaClients, PreservesPartitionOrderAndRunsPartitionsConcurrently) {
   std::exception_ptr consumerError;
   std::thread consumerThread{[&] {
     try {
-      consumer.start(
+      consumer.start(servicelib::Context{}, [] { return std::optional<servicelib::datasource::kafka::CheckpointOffsets>{}; },
           [&](servicelib::datasource::kafka::ConsumerMessage message) {
             if (message.partition() == 0 && message.offset() == 0) {
               std::unique_lock lock(mutex);
@@ -1382,7 +1623,7 @@ TEST(LibrdkafkaAdmin, ValidatesTopicAndBrokersBeforeConnecting) {
 TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
   test_async::AsioRuntime runtime;
   using namespace std::chrono_literals;
-  MockKafkaCluster cluster;
+  KafkaTestCluster cluster;
   cluster.createTopic("events");
   servicelib::config::KafkaDataConnectorConfig connector;
   connector.brokers = cluster.brokers();
@@ -1431,7 +1672,7 @@ TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
   std::exception_ptr consumerError;
   std::thread consumerThread{[&] {
     try {
-      unavailableConsumer.start([](auto) {}, [](std::exception_ptr) {});
+      unavailableConsumer.start(servicelib::Context{}, [] { return std::optional<servicelib::datasource::kafka::CheckpointOffsets>{}; }, [](auto) {}, [](std::exception_ptr) {});
     } catch (...) {
       consumerError = std::current_exception();
     }

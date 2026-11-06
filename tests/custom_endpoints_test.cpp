@@ -2,6 +2,9 @@
 #include <exception>
 #include <future>
 #include <memory>
+#include <cstdint>
+#include <map>
+#include <optional>
 #include <semaphore>
 #include <string>
 #include <thread>
@@ -39,7 +42,8 @@ void runCustom(boost::asio::awaitable<void> operation) {
 
 class TestConfig final : public servicelib::config::IConfig {
  public:
-  TestConfig() {
+  explicit TestConfig(bool customEnabled = true) {
+    customEndpoint.enabled = customEnabled;
     customEndpoint.id = 1;
     customEndpoint.name = "custom-messages";
     customEndpoint.idDataConnector = 2;
@@ -88,7 +92,7 @@ class TestConfig final : public servicelib::config::IConfig {
 
 class TestEnvironment final : public servicelib::IRuntimeEnvironment {
  public:
-  TestEnvironment() : runtimeConfig_(config_) {
+  explicit TestEnvironment(bool customEnabled = true) : config_(customEnabled), runtimeConfig_(config_) {
     service_.name = "endpoint-test";
   }
   servicelib::pool::ITaskPool* getTaskPool(const std::string&) override {
@@ -132,13 +136,17 @@ class TestEnvironment final : public servicelib::IRuntimeEnvironment {
 class OneValueProducer final
     : public servicelib::datasource::localsource::DataProducer<std::string> {
  public:
+  std::atomic<int> starts{0};
+  std::atomic<int> stops{0};
   boost::asio::awaitable<void> start(servicelib::Context, Consumer consumer) override {
+    ++starts;
     co_await consumer(servicelib::MessageContext{},
              servicelib::Payload<std::string>::make("input"));
   
     co_return;
   }
   boost::asio::awaitable<void> stop(servicelib::Context) override {
+    ++stops;
     co_return;
   }
 };
@@ -192,6 +200,30 @@ TEST(CustomDataSource, RunsProducerAndHandlerLifecycle) {
   ASSERT_TRUE(done.WaitForEvent());
   runCustom(endpoint.stop(servicelib::Context{}));
   EXPECT_EQ(observed, "input");
+}
+
+TEST(CustomDataSource, DisabledSourceDoesNotInvokeProducer) {
+  test_async::AsioRuntime runtime;
+  TestEnvironment environment{false};
+  OneValueProducer producer;
+  test_async::Event done;
+  std::string observed;
+  using Endpoint =
+      servicelib::datasource::localsource::Endpoint<std::string, int,
+                                                    CustomSourceHandler>;
+  Endpoint endpoint{
+      environment,
+      1,
+      producer,
+      CustomSourceHandler{&done, &observed},
+      [](servicelib::MessageContext, servicelib::Payload<std::string>) -> boost::asio::awaitable<void> { co_return; },
+      false};
+  runCustom(endpoint.start(servicelib::Context{}));
+
+  runCustom(endpoint.stop(servicelib::Context{}));
+  EXPECT_EQ(producer.starts.load(), 0);
+  EXPECT_EQ(producer.stops.load(), 0);
+  EXPECT_TRUE(observed.empty());
 }
 
 class ObservedReturnProducer final
@@ -289,9 +321,10 @@ class DuplicateSourceProducer final
     : public servicelib::datasource::localsource::DataProducer<std::string> {
  public:
   explicit DuplicateSourceProducer(DuplicateSourceProbe& probe) : probe_(probe) {}
-  template <typename OnError>
+  template <typename OnError, typename Restore>
   boost::asio::awaitable<void> start(servicelib::Context context, Consumer consumer,
-                                    OnError onError) {
+                                    OnError onError, Restore restore) {
+    EXPECT_FALSE(restore().has_value());
     std::exception_ptr failure;
     try {
       co_await start(context, std::move(consumer));
@@ -328,6 +361,8 @@ probe_.reuseReturned.Send();
 
 struct DuplicateSourceHandler final {
   using State = int;
+  std::optional<std::map<std::int32_t, std::int64_t>> restoreCheckpoint(
+      servicelib::MessageContext, auto&) { return std::nullopt; }
   DuplicateSourceProbe* probe;
   boost::asio::awaitable<void> onError(servicelib::MessageContext, auto&,
                                       std::exception_ptr error) {

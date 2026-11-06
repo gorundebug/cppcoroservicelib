@@ -277,6 +277,38 @@ void startsAndStopsInServiceOrder() {
          std::find(recorded.begin() + 7, recorded.end(), "delay:stop"));
 }
 
+void graphOnlyStartupKeepsSourcesClosed() {
+  EventLog events;
+  servicelib::ServiceLifecycle lifecycle;
+  lifecycle.add(servicelib::ServiceComponentKind::kStorage,
+                std::make_shared<Component>("storage", &events));
+  lifecycle.add(servicelib::ServiceComponentKind::kDataSink,
+                std::make_shared<Component>("sink", &events));
+  lifecycle.add(servicelib::ServiceComponentKind::kDataSource,
+                std::make_shared<Component>("source", &events, true));
+  runLifecycle(lifecycle.startGraph({}));
+  Require(events.snapshot() == (std::vector<std::string>{"storage:start", "sink:start"}));
+  bool rejected = false;
+  try { runLifecycle(lifecycle.start({})); } catch (const std::logic_error&) { rejected = true; }
+  Require(rejected);
+  runLifecycle(lifecycle.stop({}));
+  Require(events.snapshot() == (std::vector<std::string>{"storage:start", "sink:start", "storage:stop", "sink:stop"}));
+  PriorityPoolConfig config;
+  servicelib::config::RuntimeConfigRegistry::Publish(
+      std::make_shared<const servicelib::config::RuntimeConfig>(config));
+  {
+  Service service;
+  EventLog graphEvents;
+  service.addComponent(std::make_shared<Component>("component", &graphEvents));
+  runLifecycle(service.startGraph({}));
+  Require(service.isRunning());
+  runLifecycle(service.stop({}));
+  Require(service.isStopped());
+  Require(graphEvents.snapshot() == (std::vector<std::string>{"component:start", "component:stop"}));
+  }
+  servicelib::config::RuntimeConfigRegistry::Publish({});
+}
+
 void rollsBackStartedComponents() {
   EventLog events;
   servicelib::ServiceLifecycle lifecycle;
@@ -705,6 +737,7 @@ int main() {
     Require(second->runtimeBelongsToThisInstance());
   }
   startsAndStopsInServiceOrder();
+  graphOnlyStartupKeepsSourcesClosed();
   rollsBackStartedComponents();
   stopFailureDoesNotSkipResources();
   deadlineDiagnosesButDoesNotReleaseLiveResource();

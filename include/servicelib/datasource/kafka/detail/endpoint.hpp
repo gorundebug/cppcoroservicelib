@@ -70,6 +70,7 @@ class EndpointState final {
       throw std::logic_error("Kafka datasource endpoint already started");
     }
     requestStopSource_ = std::stop_source{};
+    context = context.withExternalCancellation(requestStopSource_.get_token());
     {
       std::lock_guard lock(concurrencyMutex_);
       stopped_ = false;
@@ -87,6 +88,8 @@ class EndpointState final {
                     return submit(std::move(message), std::move(value));
                   }, [this](Context owner, std::exception_ptr error) {
                     return reportError(std::move(owner), std::move(error));
+                  }, [this, context] {
+                    return handler_->restoreCheckpoint(MessageContext{context}, streamContext_);
                   });
             } catch (const std::exception& error) {
               transportError = std::current_exception();
@@ -218,7 +221,7 @@ class EndpointState final {
   }
 
   boost::asio::awaitable<void> submit(MessageContext context, Payload<Input> payload) {
-    if (!co_await acquire()) co_return;
+    if (!co_await acquire(context)) co_return;
     // Finish this message before returning to the Kafka partition consumer.
     struct Release final {
       EndpointState* endpoint;
@@ -227,12 +230,12 @@ class EndpointState final {
     co_await process(std::move(context), std::move(payload));
   }
 
-  boost::asio::awaitable<bool> acquire() {
+  boost::asio::awaitable<bool> acquire(const Context& context) {
     for (;;) {
       std::shared_ptr<servicelib::detail::SingleUseEvent> changed;
       {
         std::lock_guard lock(concurrencyMutex_);
-        if (stopped_) co_return false;
+        if (stopped_ || context.cancelled()) co_return false;
         const auto limit = handler_->concurrency(streamContext_);
         if (limit <= 0 || active_ < static_cast<std::size_t>(limit)) {
           ++active_;
@@ -242,7 +245,7 @@ class EndpointState final {
           concurrencyChanged_ = std::make_shared<servicelib::detail::SingleUseEvent>();
         changed = concurrencyChanged_;
       }
-      co_await changed->AsyncWait();
+      co_await changed->AsyncWait(context);
     }
   }
 

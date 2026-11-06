@@ -213,7 +213,16 @@ class ServiceLifecycle final {
         .onStopTimeout = std::move(onStopTimeout)});
   }
 
+  // Choose startGraph OR start once per lifecycle, then stop either mode.
+  [[nodiscard]] boost::asio::awaitable<void> startGraph(Context context, GraphDrainer graphDrainer = {}) {
+    co_await startImpl(std::move(context), std::move(graphDrainer), false);
+  }
   [[nodiscard]] boost::asio::awaitable<void> start(Context context, GraphDrainer graphDrainer = {}) {
+    co_await startImpl(std::move(context), std::move(graphDrainer), true);
+  }
+
+ private:
+  [[nodiscard]] boost::asio::awaitable<void> startImpl(Context context, GraphDrainer graphDrainer, bool admission) {
     auto transition = co_await transition_.acquire(context);
     if (state_ != State::kCreated) {
       throw std::logic_error("service lifecycle is already started");
@@ -223,6 +232,7 @@ class ServiceLifecycle final {
     std::exception_ptr error;
     try {
       for (const auto kind : kStartOrder) {
+        if (!admission && kind == ServiceComponentKind::kDataSource) continue;
         for (auto& entry : entries_[index(kind)]) {
           if (context.cancelled()) {
             throw std::runtime_error("service startup cancelled or expired");
@@ -248,6 +258,7 @@ class ServiceLifecycle final {
     state_ = State::kRunning;
   }
 
+ public:
   [[nodiscard]] boost::asio::awaitable<void> stop(Context context,
             log::Logger& logger = log::NoopLogger::instance()) {
     co_await stopBeforeGraphDrain(context, logger);
@@ -654,7 +665,17 @@ class ServiceApp
     lifecycle_.add(ServiceComponentKind::kComponent, std::move(component));
   }
 
+  // Start graph resources and sinks without datasource admission.
+  // Choose startGraph OR start once per lifecycle, then stop either mode.
+  [[nodiscard]] boost::asio::awaitable<void> startGraph(Context context) {
+    co_await startImpl(std::move(context), false);
+  }
   [[nodiscard]] boost::asio::awaitable<void> start(Context context) {
+    co_await startImpl(std::move(context), true);
+  }
+
+ private:
+  [[nodiscard]] boost::asio::awaitable<void> startImpl(Context context, bool admission) {
     auto transition = co_await serviceTransition_.acquire(context);
     if (running_.load() || shutdownPending_.load()) {
       throw std::logic_error("service is already active");
@@ -670,14 +691,17 @@ class ServiceApp
     std::exception_ptr error;
     try {
       status::Registry::Register(*this);
-      co_await lifecycle_.start(context, [this](Context drainContext) {
+      auto drainer = [this](Context drainContext) {
         return this->drainExecutionRuntime(std::move(drainContext));
-      });
+      };
+      if (admission) co_await lifecycle_.start(context, drainer);
+      else co_await lifecycle_.startGraph(context, drainer);
       running_.store(true, std::memory_order_release);
     } catch (...) {
       error = std::current_exception();
     }
     if (error) {
+      running_.store(false, std::memory_order_release);
       status::Registry::Unregister(*this);
       try {
         // Seal admission without waiting for failed producers to retire.
@@ -694,6 +718,7 @@ class ServiceApp
     }
   }
 
+ public:
   void setShutdownLifetime(const std::shared_ptr<void>& lifetime) {
     if (running_.load() || shutdownPending_.load()) throw std::logic_error("shutdown lifetime must be set before start");
     shutdownLifetime_ = lifetime;

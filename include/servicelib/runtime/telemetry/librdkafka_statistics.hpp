@@ -67,6 +67,14 @@ class LibrdkafkaStatistics final {
     rd_kafka_conf_set_opaque(config, this);
   }
 
+  // A transport with its own native opaque pointer forwards its statistics here.
+  int record(const char* json, std::size_t size) noexcept {
+    if (!enabled_ || !json) return 0;
+    try { update(boost::json::parse(std::string_view{json, size}).as_object()); }
+    catch (...) {} // Metrics cannot affect transport behavior.
+    return 0;
+  }
+
  private:
   static std::int64_t integer(const boost::json::object& object,
                               std::string_view name) noexcept {
@@ -84,13 +92,7 @@ class LibrdkafkaStatistics final {
   static int StatisticsCallback(rd_kafka_t*, char* json, std::size_t size,
                                 void* opaque) noexcept {
     auto* statistics = static_cast<LibrdkafkaStatistics*>(opaque);
-    if (!statistics || !json) return 0;
-    try {
-      statistics->update(boost::json::parse(std::string_view{json, size}).as_object());
-    } catch (...) {
-      // Metrics callbacks cannot affect transport behavior.
-    }
-    return 0;
+    return statistics ? statistics->record(json, size) : 0;
   }
 
   void update(const boost::json::object& snapshot) noexcept {
