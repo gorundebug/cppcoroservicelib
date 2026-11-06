@@ -1,3 +1,6 @@
+#include <memory>
+#include <vector>
+
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -16,9 +19,34 @@ using servicelib::MessageContext;
 using servicelib::Payload;
 using servicelib::detail::SingleUseEvent;
 
+class Config final : public servicelib::config::IConfig {
+ public:
+  Config() {
+    endpoint.id = 1;
+    endpoint.name = "source";
+    endpoint.enabled = true;
+    endpoint.idDataConnector = 2;
+    connector.id = 2;
+    connector.name = "custom";
+  }
+  std::vector<const servicelib::config::ServiceConfig*> GetServices() const override { return {}; }
+  std::vector<servicelib::config::StreamConfigRef> GetStreams() const override { return {}; }
+  std::vector<servicelib::config::DataConnectorConfigRef> GetDataConnectors() const override { return {connector}; }
+  std::vector<servicelib::config::EndpointConfigRef> GetEndpoints() const override { return {endpoint}; }
+  std::vector<const servicelib::config::PoolConfig*> GetPools() const override { return {}; }
+  std::vector<const servicelib::config::LinkConfig*> GetLinks() const override { return {}; }
+  std::vector<const servicelib::config::ModuleConfig*> GetModules() const override { return {}; }
+  std::vector<const servicelib::config::TypeConfig*> GetTypes() const override { return {}; }
+ private:
+  servicelib::config::CustomEndpointConfig endpoint;
+  servicelib::config::CustomDataConnectorConfig connector;
+};
+
 class Environment final : public servicelib::IServiceEnvironment {
  public:
-  std::shared_ptr<const servicelib::config::RuntimeConfig> getRuntimeConfigSnapshot() const override { return {}; }
+  std::shared_ptr<const servicelib::config::RuntimeConfig> getRuntimeConfigSnapshot() const override {
+    return std::make_shared<const servicelib::config::RuntimeConfig>(config_);
+  }
   std::shared_ptr<const servicelib::config::ServiceConfig> getServiceConfigSnapshot() const override {
     auto service = std::make_shared<servicelib::config::ServiceConfig>();
     service->name = "local-coroutine-test";
@@ -28,6 +56,7 @@ class Environment final : public servicelib::IServiceEnvironment {
   servicelib::metrics::Metrics& getMetrics() override { return metrics_; }
   servicelib::tracing::Tracing* getTracing() override { return nullptr; }
  private:
+  Config config_;
   servicelib::testlog::TestLog log_;
   servicelib::testmetrics::TestMetrics metrics_;
 };
