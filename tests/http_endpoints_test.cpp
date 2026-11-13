@@ -573,7 +573,7 @@ TEST(HttpDataSource, PreservesCanonicalHandlerAndCorrelationContract) {
 
   EXPECT_EQ(response.get().body, "reply:one");
   const servicelib::metrics::Labels labels{{"connector", "http"},
-                                            {"endpoint", "http-source"}};
+                                            {"endpoint", "http-source"}, {"protocol", ""}};
   EXPECT_EQ(environment.metrics()
                 .counter("datasource_endpoint.messages_total", labels)
                 .count(),
@@ -2472,7 +2472,7 @@ co_return;}, boost::asio::use_future);
     EXPECT_EQ(endCalls, 1);
     EXPECT_FALSE(hadError);
     const servicelib::metrics::Labels labels{{"connector", "http"},
-                                              {"endpoint", "http-source"}};
+                                              {"endpoint", "http-source"}, {"protocol", ""}};
     EXPECT_EQ(environment.metrics()
                   .counter("datasink_endpoint.messages_total", labels)
                   .count(),
