@@ -472,6 +472,12 @@ class Endpoint final {
       co_await detail::RunBlocking(std::move(shutdown));
       producerStarted_ = false;
     }
+    // Native flush/destruction must finish while producer callback storage is
+    // still owned. It cannot be abandoned at the caller's deadline, but an
+    // overrun must not be reported as a successful bounded shutdown.
+    if (context.cancelled()) {
+      throw std::runtime_error("Kafka producer shutdown context cancelled or expired");
+    }
   }
 
   [[nodiscard]] boost::asio::awaitable<void> consume(

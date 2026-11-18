@@ -53,6 +53,9 @@ fi
 options=(
   -o "&:io_backend=${CPP_CORO_IO_BACKEND:-epoll}"
   -o "&:with_grpc=${CPPCOROSERVICELIB_ENABLE_GRPC:-True}"
+  -o "&:with_nats=${CPPCOROSERVICELIB_ENABLE_NATS:-False}"
+  -o "&:with_pulsar=${CPPCOROSERVICELIB_ENABLE_PULSAR:-False}"
+  -o "&:with_redisstreams=${CPPCOROSERVICELIB_ENABLE_REDISSTREAMS:-False}"
   -o "&:with_kafka=${CPPCOROSERVICELIB_ENABLE_KAFKA:-True}"
   -o "&:with_otel=${CPPCOROSERVICELIB_ENABLE_OTEL:-False}"
   -o "&:with_tests=${CPPCOROSERVICELIB_BUILD_TESTS:-True}"

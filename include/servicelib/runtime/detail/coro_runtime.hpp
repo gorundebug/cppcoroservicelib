@@ -23,7 +23,7 @@ public:
     std::size_t workers{1};
     std::function<void(std::exception_ptr)> unhandledException;
     metrics::Metrics* metrics{};
-    // Explicit foreign blocking boundary, currently used only by Kafka.
+    // Explicit foreign blocking boundary, used by Kafka and native NATS.
     // HTTP/gRPC-only services create no such pool.
     std::size_t blockingWorkers{0};
     // Scheduling topology is independent of the compiled I/O backend.

@@ -14,3 +14,5 @@ conan export "$root/conan/recipes/gtest" --version "$(version googletest)" --use
 conan export "$root/conan/recipes/grpc" --version "$(version grpc)" --user gorundebug --channel boost
 conan export "$root/conan/recipes/opentelemetry-proto" --version "$(version opentelemetry-proto)" --user gorundebug --channel boost
 conan export "$root/conan/recipes/opentelemetry-cpp" --version "$(version opentelemetry-cpp)" --user gorundebug --channel boost
+
+conan export "$root/conan/recipes/nats-c" --version 3.14.0 --user gorundebug --channel boost

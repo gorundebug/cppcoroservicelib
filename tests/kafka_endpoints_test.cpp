@@ -99,6 +99,15 @@ class KafkaTestCluster final {
     }
   }
 
+  void delayCommit(int milliseconds) {
+    if (rd_kafka_mock_broker_push_request_error_rtts(cluster_, 1, 8, 1,
+          RD_KAFKA_RESP_ERR_NO_ERROR, milliseconds)) throw std::runtime_error("mock commit delay");
+  }
+  bool delayedCommitPending() {
+    std::size_t count{};
+    if (rd_kafka_mock_broker_error_stack_cnt(cluster_, 1, 8, &count)) throw std::runtime_error("mock commit count");
+    return count != 0;
+  }
   void setBrokerDown() {
     const auto status = rd_kafka_mock_broker_set_down(cluster_, 1);
     if (status != RD_KAFKA_RESP_ERR_NO_ERROR) {
@@ -632,6 +641,76 @@ TEST(KafkaDataSink, RequestsProducerStopBeforeJoiningDeliveryTasks) {
   runKafka(endpoint.stop(servicelib::Context{}));
 }
 
+class HeldCleanupKafkaProducer final
+    : public servicelib::datasink::kafka::ProducerClient {
+ public:
+  void stop() noexcept override {
+    ++stopCount;
+    cleanupEntered.Send();
+    releasedBeforeCompletion = releaseCleanup.WaitForEvent();
+    cleanupFinished.store(true);
+  }
+  servicelib::datasink::kafka::DeliveryResult send(
+      std::string, std::string, std::string,
+      std::optional<std::uint32_t> partition) override {
+    ++sendCount;
+    return {partition, 17, {}};
+  }
+  test_async::Event cleanupEntered, releaseCleanup;
+  std::atomic<int> stopCount{0}, sendCount{0};
+  std::atomic<bool> cleanupFinished{false}, releasedBeforeCompletion{false};
+};
+
+TEST(KafkaDataSink, NativeCleanupRetainsOwnershipAndReportsStopOverrun) {
+  using namespace std::chrono_literals;
+  // Deadline during cleanup, cancellation during cleanup, already expired,
+  // and a live-context control. No broker timing is needed to hold this boundary.
+  for (int mode = 0; mode < 4; ++mode) {
+    SCOPED_TRACE(mode);
+    test_async::AsioRuntime runtime;
+    TestEnvironment environment;
+    HeldCleanupKafkaProducer producer;
+    TestSinkEndpointStream<std::string, int> stream{environment, 3};
+    servicelib::datasink::kafka::Endpoint<std::string, int, KafkaSinkHandler>
+        endpoint{stream, producer, KafkaSinkHandler{}};
+    runKafka(endpoint.start(servicelib::Context{}));
+    std::stop_source cancellation;
+    auto owner = servicelib::Context{}.withStopToken(cancellation.get_token());
+    if (mode == 0) owner = owner.bounded(100ms);
+    if (mode == 2) owner = owner.withDeadline(std::chrono::steady_clock::now() - 1ms);
+    auto stopped = boost::asio::co_spawn(
+        servicelib::detail::ParallelExecutorRegistry::Get(), endpoint.stop(owner),
+        boost::asio::use_future);
+    EXPECT_TRUE(producer.cleanupEntered.WaitForEvent());
+    if (mode == 0) std::this_thread::sleep_until(*owner.deadline() + 5ms);
+    if (mode == 1) cancellation.request_stop();
+    EXPECT_EQ(stopped.wait_for(20ms), std::future_status::timeout);
+    EXPECT_FALSE(producer.cleanupFinished.load());
+    // Shutdown has closed admission, even while native cleanup is unfinished.
+    runKafka(endpoint.consume(servicelib::MessageContext{},
+        servicelib::Payload<std::string>::make("after-stop")));
+    EXPECT_EQ(producer.sendCount.load(), 0);
+    producer.releaseCleanup.Send();
+    if (mode == 3) {
+      EXPECT_NO_THROW(stopped.get());
+    } else {
+      try {
+        stopped.get();
+        ADD_FAILURE() << "expired/cancelled shutdown silently succeeded";
+      } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(), "Kafka producer shutdown context cancelled or expired");
+      }
+    }
+    EXPECT_TRUE(producer.cleanupFinished.load());
+    EXPECT_TRUE(producer.releasedBeforeCompletion.load());
+    EXPECT_EQ(producer.stopCount.load(), 1);
+    // Completion is remembered before reporting the overrun: a live retry
+    // succeeds without repeating native destruction or reopening admission.
+    EXPECT_NO_THROW(runKafka(endpoint.stop(servicelib::Context{}.bounded(1s))));
+    EXPECT_EQ(producer.stopCount.load(), 1);
+  }
+}
+
 class FailingKafkaProducer final
     : public servicelib::datasink::kafka::ProducerClient {
  public:
@@ -864,6 +943,7 @@ TEST(KafkaDataSource, CopiesRecordAndExposesCommit) {
   ASSERT_TRUE(done.WaitForEvent());
   runKafka(endpoint->stop(servicelib::Context{}));
   EXPECT_EQ(observed, "events:key:payload");
+  EXPECT_EQ(static_cast<servicelib::testmetrics::TestMetrics&>(environment.getMetrics()).counter("broker_endpoint.source_observations_total", {{"protocol", "kafka"}, {"connector", "kafka"}, {"endpoint", "kafka-messages"}, {"observation", "received"}}).count(), 1);
   EXPECT_TRUE(consumer.committed.load());
 }
 
@@ -1116,9 +1196,12 @@ class DelayedKafkaConsumer final
     : public servicelib::datasource::kafka::ConsumerClient {
  public:
   void start(servicelib::Context, servicelib::datasource::kafka::RestoreCheckpoint, Callback callback, ErrorCallback) override {
+    struct Returned {
+      std::atomic<bool>& flag;
+      ~Returned() { flag.store(true, std::memory_order_release); }
+    } returnedOnExit{returned};
     callback(servicelib::datasource::kafka::ConsumerMessage{
         "key", "delayed", "events", 0, 1});
-    returned.store(true, std::memory_order_release);
   }
   void stop() noexcept override {
     stopCalls.fetch_add(1, std::memory_order_relaxed);
@@ -1158,7 +1241,7 @@ struct DelayedKafkaSourceHandler final {
   }
   boost::asio::awaitable<void> endRequest(
       servicelib::MessageContext, auto&, std::exception_ptr error, State&) {
-    EXPECT_FALSE(error);
+    EXPECT_TRUE(error); // Shutdown cancellation is a failed request, not success.
     probe->ended.fetch_add(1, std::memory_order_release);
     co_return;
   }
@@ -1370,7 +1453,7 @@ TEST(LibrdkafkaClients, RestoresCheckpointInsteadOfCommittedGroupAndRejectsStale
   }
 }
 
-TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
+void rebalanceRetainedHandles(bool restoring) {
   // The protocol mock does not complete the repeated membership transitions
   // exercised here. Verify group ownership against an actual broker.
   if (!std::getenv("SA_TEST_KAFKA_BROKERS"))
@@ -1407,7 +1490,10 @@ TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
   std::map<std::uint32_t, ConsumerMessage> firstMessages;
   std::optional<ConsumerMessage> secondMessage;
   std::exception_ptr firstFailure, secondFailure;
-  const auto restore = [&]() -> std::optional<CheckpointOffsets> { return checkpoint; };
+  const auto restore = [&]() -> std::optional<CheckpointOffsets> {
+    if (restoring) return checkpoint;
+    return std::nullopt;
+  };
   std::thread firstThread([&] {
     try {
       first.start(servicelib::Context{}, restore, [&](ConsumerMessage message) {
@@ -1439,8 +1525,8 @@ TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
     std::unique_lock lock(mutex);
     changed.wait_for(lock, 20s, [&] { return secondMessage.has_value() || secondFailure; });
     if (secondMessage) {
-      transferred = secondMessage->offset() == checkpoint.at(static_cast<std::int32_t>(secondMessage->partition())) &&
-                    secondMessage->value() == "after-image";
+      transferred = !restoring || (secondMessage->offset() == checkpoint.at(static_cast<std::int32_t>(secondMessage->partition())) &&
+                    secondMessage->value() == "after-image");
       auto previous = firstMessages.find(secondMessage->partition());
       if (previous != firstMessages.end()) {
         stale = previous->second;
@@ -1452,6 +1538,7 @@ TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
   // destruction check would miss mutation of a later group generation.
   bool staleAckRejected = false;
   if (stale) {
+    EXPECT_THROW(stale->markMessage(), std::runtime_error);
     try { runKafka(stale->commit()); }
     catch (const std::runtime_error&) { staleAckRejected = true; }
   }
@@ -1465,6 +1552,13 @@ TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
   EXPECT_TRUE(staleAckRejected);
   if (firstFailure) std::rethrow_exception(firstFailure);
   if (secondFailure) std::rethrow_exception(secondFailure);
+}
+
+TEST(LibrdkafkaClients, RebalanceRestoresNewOwnerAndRevokesOldMessage) {
+  rebalanceRetainedHandles(true);
+}
+TEST(LibrdkafkaClients, OrdinaryRebalanceRevokesRetainedMessage) {
+  rebalanceRetainedHandles(false);
 }
 
 TEST(LibrdkafkaClients, CheckpointFailureNeverFallsBackToEarliest) {
@@ -1688,3 +1782,5 @@ TEST(LibrdkafkaClients, BrokerLossReturnsErrorAndConsumerRemainsStoppable) {
 }  // namespace
 
 #include "kafka_transaction_visibility_test.hpp"
+
+#include "kafka_failure_admission_test.hpp"

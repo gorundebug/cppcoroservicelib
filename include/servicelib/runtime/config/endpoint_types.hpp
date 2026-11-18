@@ -13,6 +13,9 @@
 #include <variant>
 
 #include <servicelib/api/serviceapi.hpp>
+#include <servicelib/runtime/config/nats.hpp>
+#include <servicelib/runtime/config/pulsar.hpp>
+#include <servicelib/runtime/config/redisstreams.hpp>
 #include <servicelib/api/serviceapi_parse.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>
 
@@ -175,6 +178,9 @@ class EndpointConfigRef {
   using Variant = std::variant<
       std::reference_wrapper<const HttpEndpointConfig>,
       std::reference_wrapper<const GrpcEndpointConfig>,
+      std::reference_wrapper<const NatsEndpointConfig>,
+      std::reference_wrapper<const PulsarEndpointConfig>,
+      std::reference_wrapper<const RedisStreamsEndpointConfig>,
       std::reference_wrapper<const KafkaEndpointConfig>,
       std::reference_wrapper<const CronEndpointConfig>,
       std::reference_wrapper<const TemporalEndpointConfig>,
@@ -191,6 +197,9 @@ class EndpointConfigRef {
  public:
   EndpointConfigRef(const HttpEndpointConfig& v)   : value_(std::cref(v)) {}
   EndpointConfigRef(const GrpcEndpointConfig& v)   : value_(std::cref(v)) {}
+  EndpointConfigRef(const NatsEndpointConfig& v) : value_(std::cref(v)) {}
+  EndpointConfigRef(const PulsarEndpointConfig& v) : value_(std::cref(v)) {}
+  EndpointConfigRef(const RedisStreamsEndpointConfig& v) : value_(std::cref(v)) {}
   EndpointConfigRef(const KafkaEndpointConfig& v)  : value_(std::cref(v)) {}
   EndpointConfigRef(const CronEndpointConfig& v)   : value_(std::cref(v)) {}
   EndpointConfigRef(const TemporalEndpointConfig& v) : value_(std::cref(v)) {}

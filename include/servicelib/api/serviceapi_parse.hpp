@@ -140,11 +140,35 @@ inline constexpr std::array kDataConnectorTypeMap{
     std::pair{"Kafka"sv, DataConnectorType::kKafka},
     std::pair{"Custom"sv, DataConnectorType::kCustom},
     std::pair{"Cron"sv, DataConnectorType::kCron},
-    std::pair{"Temporal"sv, DataConnectorType::kTemporal}};
+    std::pair{"Temporal"sv, DataConnectorType::kTemporal},
+    std::pair{"NATS"sv, DataConnectorType::kNATS},
+    std::pair{"JetStream"sv, DataConnectorType::kJetStream},
+    std::pair{"RabbitMQ"sv, DataConnectorType::kRabbitMQ},
+    std::pair{"RedisStreams"sv, DataConnectorType::kRedisStreams},
+    std::pair{"Pulsar"sv, DataConnectorType::kPulsar}};
 
 inline DataConnectorType Parse(const config::YamlValue& value,
                          config::TypeTag<DataConnectorType>) {
   return detail::ParseEnum(value, kDataConnectorTypeMap);
+}
+
+inline constexpr std::array kRabbitMQQueueTypeMap{
+    std::pair{"quorum"sv, RabbitMQQueueType::kQuorum},
+    std::pair{"classic"sv, RabbitMQQueueType::kClassic}};
+
+inline RabbitMQQueueType Parse(const config::YamlValue& value,
+                         config::TypeTag<RabbitMQQueueType>) {
+  return detail::ParseEnum(value, kRabbitMQQueueTypeMap);
+}
+
+inline constexpr std::array kRabbitMQExchangeTypeMap{
+    std::pair{"direct"sv, RabbitMQExchangeType::kDirect},
+    std::pair{"topic"sv, RabbitMQExchangeType::kTopic},
+    std::pair{"fanout"sv, RabbitMQExchangeType::kFanout}};
+
+inline RabbitMQExchangeType Parse(const config::YamlValue& value,
+                         config::TypeTag<RabbitMQExchangeType>) {
+  return detail::ParseEnum(value, kRabbitMQExchangeTypeMap);
 }
 
 inline constexpr std::array kProcessPatternMap{
@@ -219,7 +243,23 @@ inline constexpr std::array kDataConnectorImplementationMap{
     std::pair{"cpp/libcron"sv, DataConnectorImplementation::kCppLibcron},
     std::pair{"temporal/go"sv, DataConnectorImplementation::kTemporalGo},
     std::pair{"temporal/python"sv, DataConnectorImplementation::kTemporalPython},
-    std::pair{"temporal/typescript"sv, DataConnectorImplementation::kTemporalTypeScript}};
+    std::pair{"temporal/typescript"sv, DataConnectorImplementation::kTemporalTypeScript},
+    std::pair{"nats.go"sv, DataConnectorImplementation::kNatsGo},
+    std::pair{"nats.py"sv, DataConnectorImplementation::kNatsPy},
+    std::pair{"@nats-io/transport-node"sv, DataConnectorImplementation::kNatsNode},
+    std::pair{"async-nats"sv, DataConnectorImplementation::kAsyncNats},
+    std::pair{"nats.c"sv, DataConnectorImplementation::kNatsC},
+    std::pair{"rabbitmq-amqp-go-client"sv, DataConnectorImplementation::kRabbitMQAMQPGo},
+    std::pair{"rabbitmq-amqp-python-client"sv, DataConnectorImplementation::kRabbitMQAMQPPython},
+    std::pair{"rabbitmq-amqp-js-client"sv, DataConnectorImplementation::kRabbitMQAMQPJavaScript},
+    std::pair{"go-redis"sv, DataConnectorImplementation::kGoRedis},
+    std::pair{"redis-py"sv, DataConnectorImplementation::kRedisPy},
+    std::pair{"node-redis"sv, DataConnectorImplementation::kNodeRedis},
+    std::pair{"hiredis"sv, DataConnectorImplementation::kHiredis},
+    std::pair{"pulsar-client-go"sv, DataConnectorImplementation::kPulsarGo},
+    std::pair{"pulsar-client-python"sv, DataConnectorImplementation::kPulsarPython},
+    std::pair{"pulsar-client-node"sv, DataConnectorImplementation::kPulsarNode},
+    std::pair{"pulsar-client-cpp"sv, DataConnectorImplementation::kPulsarCpp}};
 
 inline DataConnectorImplementation Parse(const config::YamlValue& value,
                          config::TypeTag<DataConnectorImplementation>) {

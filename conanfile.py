@@ -30,6 +30,9 @@ class CppCoroServiceLibConan(ConanFile):
         "fPIC": [True, False],
         "with_grpc": [True, False],
         "with_kafka": [True, False],
+        "with_nats": [True, False],
+        "with_pulsar": [True, False],
+        "with_redisstreams": [True, False],
         "with_otel": [True, False],
         "with_cron": [True, False],
         "with_tests": [True, False],
@@ -40,6 +43,9 @@ class CppCoroServiceLibConan(ConanFile):
         "fPIC": True,
         "with_grpc": False,
         "with_kafka": False,
+        "with_nats": False,
+        "with_pulsar": False,
+        "with_redisstreams": False,
         "with_otel": False,
         "with_cron": True,
         "with_tests": False,
@@ -110,6 +116,9 @@ class CppCoroServiceLibConan(ConanFile):
             self.requires(f"re2/{VERSIONS['re2']}", override=True)
             self.requires(f"asio-grpc/{VERSIONS['asio-grpc']}")
 
+        if self.options.with_nats:
+            self.requires("nats-c/3.14.0@gorundebug/boost")
+
         if self.options.with_kafka:
             self.requires(f"librdkafka/{VERSIONS['librdkafka']}@gorundebug/boost")
 
@@ -156,6 +165,9 @@ class CppCoroServiceLibConan(ConanFile):
         toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_CRON"] = bool(
             self.options.with_cron
         )
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_NATS"] = bool(self.options.with_nats)
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_PULSAR"] = bool(self.options.with_pulsar)
+        toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_REDISSTREAMS"] = bool(self.options.with_redisstreams)
         toolchain.generate()
 
     def build(self):

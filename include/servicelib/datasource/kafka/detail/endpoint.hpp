@@ -65,6 +65,8 @@ class EndpointState final {
   [[nodiscard]] int id() const noexcept { return endpointId_; }
 
   boost::asio::awaitable<void> start(Context context) {
+    if (handler_->concurrency(streamContext_) < 0)
+      throw std::invalid_argument("Kafka concurrency must be nonnegative (0 is unlimited)");
     bool expected = false;
     if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
       throw std::logic_error("Kafka datasource endpoint already started");
@@ -177,6 +179,7 @@ class EndpointState final {
       if (auto* traceSpan = result->span.get()) traceSpan->addEvent("late_result");
       co_return;
     }
+    try {
     const auto messageId = co_await handler_->getMessageId(context, streamContext_,
                                                  result->state, payload.get());
     std::shared_ptr<typename Result::Callback> callback;
@@ -206,6 +209,15 @@ class EndpointState final {
     }
     if (auto* traceSpan = result->span.get()) traceSpan->addEvent("result_consumed",
                        {tracing::Attribute::String("message_id", messageId)});
+    } catch (...) {
+      {
+        std::lock_guard lock(resultErrorsMutex_);
+        resultErrors_.try_emplace(result.get(), std::current_exception());
+      }
+      bool expected = false;
+      if (result->wakeSent.compare_exchange_strong(expected, true)) result->done.Send();
+      throw; // Preserve the typed result stream's existing error routing.
+    }
   }
 
  private:
@@ -221,7 +233,7 @@ class EndpointState final {
   }
 
   boost::asio::awaitable<void> submit(MessageContext context, Payload<Input> payload) {
-    if (!co_await acquire(context)) co_return;
+    if (!co_await acquire(context)) throw std::runtime_error("Kafka request admission cancelled");
     // Finish this message before returning to the Kafka partition consumer.
     struct Release final {
       EndpointState* endpoint;
@@ -237,7 +249,8 @@ class EndpointState final {
         std::lock_guard lock(concurrencyMutex_);
         if (stopped_ || context.cancelled()) co_return false;
         const auto limit = handler_->concurrency(streamContext_);
-        if (limit <= 0 || active_ < static_cast<std::size_t>(limit)) {
+        if (limit < 0) throw std::invalid_argument("Kafka concurrency must be nonnegative (0 is unlimited)");
+        if (limit == 0 || active_ < static_cast<std::size_t>(limit)) {
           ++active_;
           co_return true;
         }
@@ -288,7 +301,7 @@ class EndpointState final {
       if (auto* traceSpan = startedSpan.span()) traceSpan->addEvent("begin_request.error",
                          {tracing::Attribute::String("error", message)});
       metrics_.beginRequestFailed(message);
-      co_return;
+      throw;
     }
     if (auto* traceSpan = startedSpan.span()) traceSpan->addEvent("begin_request");
     context = std::move(begin->context);
@@ -353,9 +366,11 @@ class EndpointState final {
         }
       }
     }
+    if (!error && (context.cancelled() || requestStopSource_.stop_requested()))
+      error = std::make_exception_ptr(std::runtime_error("Kafka datasource request cancelled"));
     co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
     auto lifetimeLock = co_await result->lifetimeMutex.lock();
-    if (resultWaitFailed &&
+    if (resultWaitFailed && !context.cancelled() && !requestStopSource_.stop_requested() &&
         result->completed.load(std::memory_order_acquire)) {
       error = nullptr;
       if (auto* traceSpan = startedSpan.span()) traceSpan->addEvent("done_received");
@@ -368,6 +383,16 @@ class EndpointState final {
             {tracing::Attribute::String("error", message)});
       }
     }
+    {
+      std::lock_guard lock(resultErrorsMutex_);
+      const auto found = resultErrors_.find(result.get());
+      if (found != resultErrors_.end()) {
+        error = found->second;
+        resultErrors_.erase(found);
+      }
+    }
+    if (!error && (context.cancelled() || requestStopSource_.stop_requested()))
+      error = std::make_exception_ptr(std::runtime_error("Kafka datasource request cancelled"));
     if (pendingInserted) {
       static_cast<void>(pending_.pop(streamId));
       metrics_.pendingRemove(streamId);
@@ -375,9 +400,10 @@ class EndpointState final {
     try {
       co_await handler_->endRequest(context, streamContext_, error, result->state);
     } catch (...) {
-      // endRequest is noexcept by contract.
+      if (!error) error = std::current_exception();
     }
     metrics_.requestEnd(startedAt, error);
+    if (error) std::rethrow_exception(error);
   }
 
   static StreamTraceIdentity resolveStreamIdentity(
@@ -401,6 +427,8 @@ class EndpointState final {
   bool hasResult_;
   store::RotatingMap<std::string, std::shared_ptr<Result>> pending_;
   DataSourceEndpointMetrics metrics_;
+  std::mutex resultErrorsMutex_;
+  std::unordered_map<const Result*, std::exception_ptr> resultErrors_;
   std::mutex concurrencyMutex_;
   std::shared_ptr<servicelib::detail::SingleUseEvent> concurrencyChanged_;
   std::size_t active_{0};

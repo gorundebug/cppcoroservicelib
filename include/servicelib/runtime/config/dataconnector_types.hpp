@@ -13,6 +13,9 @@
 #include <variant>
 
 #include <servicelib/api/serviceapi.hpp>
+#include <servicelib/runtime/config/nats.hpp>
+#include <servicelib/runtime/config/pulsar.hpp>
+#include <servicelib/runtime/config/redisstreams.hpp>
 #include <servicelib/api/serviceapi_parse.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>
 
@@ -124,6 +127,9 @@ class DataConnectorConfigRef {
   using Variant = std::variant<
       std::reference_wrapper<const HttpDataConnectorConfig>,
       std::reference_wrapper<const GrpcDataConnectorConfig>,
+      std::reference_wrapper<const NatsDataConnectorConfig>,
+      std::reference_wrapper<const PulsarDataConnectorConfig>,
+      std::reference_wrapper<const RedisStreamsDataConnectorConfig>,
       std::reference_wrapper<const KafkaDataConnectorConfig>,
       std::reference_wrapper<const CronDataConnectorConfig>,
       std::reference_wrapper<const TemporalDataConnectorConfig>,
@@ -140,6 +146,9 @@ class DataConnectorConfigRef {
  public:
   DataConnectorConfigRef(const HttpDataConnectorConfig& v)   : value_(std::cref(v)) {}
   DataConnectorConfigRef(const GrpcDataConnectorConfig& v)   : value_(std::cref(v)) {}
+  DataConnectorConfigRef(const NatsDataConnectorConfig& v) : value_(std::cref(v)) {}
+  DataConnectorConfigRef(const PulsarDataConnectorConfig& v) : value_(std::cref(v)) {}
+  DataConnectorConfigRef(const RedisStreamsDataConnectorConfig& v) : value_(std::cref(v)) {}
   DataConnectorConfigRef(const KafkaDataConnectorConfig& v)  : value_(std::cref(v)) {}
   DataConnectorConfigRef(const CronDataConnectorConfig& v)   : value_(std::cref(v)) {}
   DataConnectorConfigRef(const TemporalDataConnectorConfig& v) : value_(std::cref(v)) {}

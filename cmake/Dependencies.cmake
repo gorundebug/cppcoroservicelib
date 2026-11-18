@@ -484,3 +484,5 @@ if(CPPCOROSERVICELIB_ENABLE_OTEL)
     endif()
   endforeach()
 endif()
+
+include(${CMAKE_CURRENT_LIST_DIR}/NatsDependency.cmake)

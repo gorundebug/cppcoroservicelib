@@ -1,10 +1,10 @@
 #pragma once
+#include <servicelib/runtime/detail/source_metrics.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
-#include <deque>
 #include <exception>
 #include <functional>
 #include <map>
@@ -126,7 +126,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
       std::lock_guard lock(assignments_->mutex);
       if (stopRequested_.load(std::memory_order_acquire) || owner_.cancelled())
         throw std::runtime_error("Kafka consumer stopped during startup");
-      assignments_->consumer = consumer_.get();
+      assignments_->consumer = consumer_;
       running_.store(true, std::memory_order_release);
     }
     try {
@@ -177,7 +177,11 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
   }
 
  private:
-  struct Assignment final { std::stop_source stop; };
+  struct Assignment final {
+    std::stop_source stop;
+    bool failed{};  // protected by Assignments::mutex
+    bool commitPending{};
+  };
   struct RetiredAssignments final {
     std::vector<std::shared_ptr<Assignment>> values;
     ~RetiredAssignments() {
@@ -189,7 +193,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
   // Retained message acknowledgements own this gate, never the client object.
   struct Assignments final {
     std::mutex mutex;
-    rd_kafka_t* consumer{};
+    std::shared_ptr<rd_kafka_t> consumer;
     std::map<std::int32_t, std::shared_ptr<Assignment>> partitions;
   };
 
@@ -203,7 +207,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
 
   std::shared_ptr<Assignment> assignment(std::int32_t partition) {
     std::lock_guard lock(assignments_->mutex);
-    const auto found = assignments_->partitions.find(partition);
+    const auto found = assignments_->partitions.find(static_cast<std::int32_t>(partition));
     return found == assignments_->partitions.end() ? nullptr : found->second;
   }
 
@@ -327,7 +331,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
   struct PartitionLane final {
     std::mutex mutex;
     std::condition_variable changed;
-    std::deque<QueuedMessage> messages;
+    std::optional<QueuedMessage> pending;
     bool stopped{};
     std::thread worker;
   };
@@ -409,8 +413,8 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
           });
       rd_kafka_conf_set_rebalance_cb(kafkaConfig, &rebalanceCallback);
       char error[512]{};
-      consumer_.reset(rd_kafka_new(RD_KAFKA_CONSUMER, kafkaConfig, error,
-                                   sizeof(error)));
+      consumer_ = std::shared_ptr<rd_kafka_t>(rd_kafka_new(RD_KAFKA_CONSUMER, kafkaConfig, error,
+                                   sizeof(error)), KafkaDeleter{});
       if (!consumer_) {
         kafkaConfig = nullptr;
         throw std::runtime_error(std::string{"Kafka consumer: "} + error);
@@ -437,20 +441,40 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
     }
   }
 
+  static void setPaused(rd_kafka_t* consumer, const std::string& topic,
+                        std::uint32_t partition, bool paused) {
+    auto* partitions = rd_kafka_topic_partition_list_new(1);
+    rd_kafka_topic_partition_list_add(partitions, topic.c_str(), static_cast<std::int32_t>(partition));
+    const auto status = paused ? rd_kafka_pause_partitions(consumer, partitions)
+                               : rd_kafka_resume_partitions(consumer, partitions);
+    const auto itemStatus = partitions->elems[0].err;
+    rd_kafka_topic_partition_list_destroy(partitions);
+    if (status || itemStatus)
+      throw std::runtime_error(std::string{"Kafka pause/resume: "} +
+          rd_kafka_err2str(status ? status : itemStatus));
+  }
+
   void enqueue(const Callback& callback, QueuedMessage message) {
-    if (!message.assignment || message.assignment->stop.stop_requested()) return;
-    const auto partition = message.partition;
-    auto [it, inserted] = lanes_.try_emplace(
-        partition, std::make_unique<PartitionLane>());
-    auto& lane = *it->second;
-    if (inserted) {
-      lane.worker = std::thread([this, &lane, callback] {
-        runLane(lane, callback);
-      });
+    const auto lease = message.assignment;
+    {
+      std::lock_guard lock(assignments_->mutex);
+      const auto found = assignments_->partitions.find(static_cast<std::int32_t>(message.partition));
+      if (!assignments_->consumer || !running_.load(std::memory_order_acquire) ||
+          !lease || lease->stop.stop_requested() || lease->failed ||
+          found == assignments_->partitions.end() || found->second != lease) return;
+      // Pause before the next poll. Native fetch buffering remains under
+      // librdkafka's own limits; application admission is one record/partition.
+      setPaused(consumer_.get(), message.topic, message.partition, true);
     }
+    auto [it, inserted] = lanes_.try_emplace(message.partition, std::make_unique<PartitionLane>());
+    auto& lane = *it->second;
+    if (inserted) lane.worker = std::thread([this, &lane, callback] { runLane(lane, callback); });
     {
       std::lock_guard lock(lane.mutex);
-      lane.messages.push_back(std::move(message));
+      if (lane.pending && !lane.pending->assignment->stop.stop_requested())
+        throw std::runtime_error("Kafka native pause did not bound partition admission");
+      // Only a revoked, never dispatched old-generation record can be replaced.
+      lane.pending.emplace(std::move(message));
     }
     lane.changed.notify_one();
   }
@@ -461,15 +485,30 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
         std::optional<QueuedMessage> message;
         {
           std::unique_lock lock(lane.mutex);
-          lane.changed.wait(lock,
-                            [&lane] {
-                              return lane.stopped || !lane.messages.empty();
-                            });
+          lane.changed.wait(lock, [&lane] { return lane.stopped || lane.pending.has_value(); });
           if (lane.stopped) return;
-          message.emplace(std::move(lane.messages.front()));
-          lane.messages.pop_front();
+          message = std::move(lane.pending);
+          lane.pending.reset();
         }
-        if (!message->assignment->stop.stop_requested()) dispatch(callback, std::move(*message));
+        const auto lease = message->assignment;
+        const auto partition = message->partition;
+        const auto topic = message->topic;
+        bool failed = false;
+        if (!lease->stop.stop_requested()) {
+          try { dispatch(callback, std::move(*message)); }
+          catch (...) { failed = true; }
+        }
+        {
+          std::lock_guard lock(assignments_->mutex);
+          const auto found = assignments_->partitions.find(static_cast<std::int32_t>(partition));
+          if (found != assignments_->partitions.end() && found->second == lease &&
+              assignments_->consumer && !lease->stop.stop_requested()) {
+            lease->failed = failed;
+            if (!failed) setPaused(assignments_->consumer.get(), topic, partition, false);
+          }
+        }
+        // Never run stop callbacks under the assignment/ACK lock.
+        if (failed) lease->stop.request_stop();
         if (!running_.load(std::memory_order_acquire)) return;
       }
     } catch (...) {
@@ -504,7 +543,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
       {
         std::lock_guard lock(lane->mutex);
         lane->stopped = true;
-        lane->messages.clear();
+        lane->pending.reset();
       }
       lane->changed.notify_all();
     }
@@ -518,20 +557,60 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
   static void acknowledge(const std::shared_ptr<Assignments>& state,
       const std::shared_ptr<Assignment>& lease, const std::string& topic,
       std::uint32_t partition, std::int64_t offset, bool commit) {
-    std::lock_guard lock(state->mutex);
-    const auto found = state->partitions.find(static_cast<std::int32_t>(partition));
-    if (!state->consumer || lease->stop.stop_requested() ||
-        found == state->partitions.end() || found->second != lease)
-      throw std::runtime_error("Kafka message belongs to a revoked assignment");
-    auto* offsets = rd_kafka_topic_partition_list_new(1);
-    auto* entry = rd_kafka_topic_partition_list_add(
-        offsets, topic.c_str(), static_cast<std::int32_t>(partition));
-    entry->offset = offset + 1;
-    const auto status = commit ? rd_kafka_commit(state->consumer, offsets, 0)
-                               : rd_kafka_offsets_store(state->consumer, offsets);
-    rd_kafka_topic_partition_list_destroy(offsets);
-    if (status != RD_KAFKA_RESP_ERR_NO_ERROR)
-      throw std::runtime_error(std::string{"Kafka acknowledge: "} + rd_kafka_err2str(status));
+    struct Receipt {
+      bool done{};
+      rd_kafka_resp_err_t error{};
+      static void complete(rd_kafka_t*, rd_kafka_resp_err_t error,
+                           rd_kafka_topic_partition_list_t* offsets, void* opaque) noexcept {
+        auto& self = *static_cast<Receipt*>(opaque);
+        self.error = error;
+        if (!self.error && offsets) {
+          for (int i = 0; i < offsets->cnt; ++i)
+            if (offsets->elems[i].err) { self.error = offsets->elems[i].err; break; }
+        }
+        self.done = true; // served only by this operation's private queue
+      }
+    } receipt;
+    std::shared_ptr<rd_kafka_t> native;
+    std::unique_ptr<rd_kafka_queue_t, decltype(&rd_kafka_queue_destroy)> queue{
+        nullptr, &rd_kafka_queue_destroy};
+    const auto current = [&] {
+      const auto found = state->partitions.find(static_cast<std::int32_t>(partition));
+      return state->consumer && !lease->stop.stop_requested() && !lease->failed &&
+             found != state->partitions.end() && found->second == lease;
+    };
+    {
+      std::lock_guard lock(state->mutex);
+      if (!current()) throw std::runtime_error("Kafka message belongs to a revoked assignment");
+      if (commit && lease->commitPending)
+        throw std::runtime_error("Kafka partition already has an explicit commit pending");
+      native = state->consumer;
+      auto* offsets = rd_kafka_topic_partition_list_new(1);
+      auto* entry = rd_kafka_topic_partition_list_add(offsets, topic.c_str(), static_cast<std::int32_t>(partition));
+      entry->offset = offset + 1;
+      if (commit) queue.reset(rd_kafka_queue_new(native.get()));
+      // The lock protects the generation check through native enqueue only.
+      // No network wait, callback execution, or coroutine suspension under it.
+      const auto status = commit
+          ? rd_kafka_commit_queue(native.get(), offsets, queue.get(), &Receipt::complete, &receipt)
+          : rd_kafka_offsets_store(native.get(), offsets);
+      const auto itemStatus = offsets->elems[0].err;
+      rd_kafka_topic_partition_list_destroy(offsets);
+      if (!commit && itemStatus) throw std::runtime_error(std::string{"Kafka acknowledge: "} + rd_kafka_err2str(itemStatus));
+      if (status) throw std::runtime_error(std::string{"Kafka acknowledge: "} + rd_kafka_err2str(status));
+      if (!commit) return;
+      lease->commitPending = true;
+    }
+    // Existing blocking executor owns the receipt and native handle through
+    // completion. Revocation/mark/poll remain free to progress concurrently.
+    while (!receipt.done) rd_kafka_queue_poll_callback(queue.get(), 100);
+    {
+      std::lock_guard lock(state->mutex);
+      lease->commitPending = false;
+      if (!current()) throw std::runtime_error("Kafka assignment revoked during commit");
+    }
+    if (receipt.error)
+      throw std::runtime_error(std::string{"Kafka acknowledge: "} + rd_kafka_err2str(receipt.error));
   }
 
   void rememberError(std::exception_ptr error) noexcept {
@@ -589,14 +668,21 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
         break;
       }
       if (!name) continue;
-      const std::string_view key{name};
+      std::string key{name};
+      // Reserved propagation names are ASCII case-insensitive on the wire.
+      // Canonicalize names only; preserve the original value bytes and filter
+      // out non-reserved headers exactly as before.
+      for (char& character : key) {
+        if (character >= 'A' && character <= 'Z')
+          character = static_cast<char>(character + ('a' - 'A'));
+      }
       if (key != "x-stream-id" &&
           (!tracingEnabled ||
            (key != "x-trace" && key != "traceparent" &&
             key != "tracestate" && key != "baggage"))) {
         continue;
       }
-      result[std::string{key}] = CopyBytes(value, size);
+      result[std::move(key)] = CopyBytes(value, size);
     }
     return result;
   }
@@ -633,7 +719,7 @@ class LibrdkafkaConsumerClient final : public ConsumerClient {
   std::string topic_;
   bool tracingEnabled_;
   telemetry::LibrdkafkaStatistics statistics_;
-  std::unique_ptr<rd_kafka_t, KafkaDeleter> consumer_;
+  std::shared_ptr<rd_kafka_t> consumer_;
   std::map<std::uint32_t, std::unique_ptr<PartitionLane>> lanes_;
   std::mutex errorMutex_;
   std::exception_ptr error_;
@@ -648,8 +734,11 @@ class ProducerAdapter final {
  public:
   using Consumer = std::function<boost::asio::awaitable<void>(MessageContext, Payload<ConsumerMessage>)>;
   using ErrorConsumer = std::function<boost::asio::awaitable<void>(Context, std::exception_ptr)>;
-  ProducerAdapter(ConsumerClient& client, IServiceEnvironment& environment)
-      : client_(client), tracingEnabled_(environment.getTracing() != nullptr) {}
+  ProducerAdapter(ConsumerClient& client, IServiceEnvironment& environment,
+                  std::string connector, std::string endpoint)
+      : client_(client), tracingEnabled_(environment.getTracing() != nullptr),
+        observations_(std::make_shared<servicelib::detail::SourceMetrics>(
+            environment.getMetrics(), "kafka", connector, endpoint)) {}
 
   boost::asio::awaitable<void> start(Context context, Consumer consumer, ErrorConsumer onError, RestoreCheckpoint restore) {
     co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation());
@@ -661,11 +750,12 @@ class ProducerAdapter final {
     auto executor = co_await boost::asio::this_coro::executor;
     // The third-party polling API is explicitly blocking. Only this dedicated
     // thread and its partition lanes may wait on futures, never Asio workers.
-    std::thread polling([client = &client_, tracingEnabled = tracingEnabled_,
+    std::thread polling([client = &client_, tracingEnabled = tracingEnabled_, observations = observations_,
                          owner = std::move(context),
                          consumer = std::move(consumer), onError = std::move(onError), restore = std::move(restore), executor, completion] {
       try {
-        client->start(owner, std::move(restore), [owner, tracingEnabled, consumer, executor](ConsumerMessage message) {
+        client->start(owner, std::move(restore), [owner, tracingEnabled, consumer, executor, observations](ConsumerMessage message) {
+          observations->observe("received");
           auto context = servicelib::detail::ContextFromKafkaHeaders(
               MessageContext{owner}.withExternalCancellation(message.assignmentToken()), message.headers(), tracingEnabled);
           boost::asio::co_spawn(executor,
@@ -691,6 +781,7 @@ class ProducerAdapter final {
  private:
   ConsumerClient& client_;
   bool tracingEnabled_{};
+  std::shared_ptr<servicelib::detail::SourceMetrics> observations_;
 };
 
 template <typename Handler, typename T, typename R, typename E>
@@ -778,7 +869,8 @@ class Endpoint final {
   Endpoint(IServiceEnvironment& environment, int endpointId,
            int streamConfigId, ConsumerClient& consumer, Handler handler,
            Output output, bool hasResult, ErrorOutput errorOutput = {})
-      : producer_(consumer, environment),
+      : producer_(consumer, environment, connectorConfig(environment, endpointId).name,
+                  endpointConfig(environment, endpointId).name),
         environment_(environment),
         endpointId_(endpointId),
         implementation_(
