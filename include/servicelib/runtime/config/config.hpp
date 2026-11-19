@@ -198,12 +198,15 @@ class RuntimeConfig {
                    "duplicate service id: " + std::to_string(svc->id));
     }
     for (const auto& ep : config_.GetEndpoints()) {
+      if (const auto* query = ep.As<QueryEndpointConfig>()) query->Validate();
       InsertUnique(endpointsByName_, ep.GetName(), ep,
                    "duplicate endpoint name: " + ep.GetName());
       InsertUnique(endpointsByID_, ep.GetID(), ep,
                    "duplicate endpoint id: " + std::to_string(ep.GetID()));
     }
     for (const auto& dc : config_.GetDataConnectors()) {
+      if (const auto* query = dc.As<PostgreSQLLibpqDataConnectorConfig>()) query->Validate();
+      if (const auto* query = dc.As<S3AWSDataConnectorConfig>()) query->Validate();
       InsertUnique(dataConnectorsByName_, dc.GetName(), dc,
                    "duplicate data connector name: " + dc.GetName());
       InsertUnique(

@@ -53,6 +53,8 @@ fi
 options=(
   -o "&:io_backend=${CPP_CORO_IO_BACKEND:-epoll}"
   -o "&:with_grpc=${CPPCOROSERVICELIB_ENABLE_GRPC:-True}"
+  -o "&:with_s3=${CPPCOROSERVICELIB_ENABLE_S3:-False}"
+  -o "&:with_postgresql=${CPPCOROSERVICELIB_ENABLE_POSTGRESQL:-False}"
   -o "&:with_nats=${CPPCOROSERVICELIB_ENABLE_NATS:-False}"
   -o "&:with_pulsar=${CPPCOROSERVICELIB_ENABLE_PULSAR:-False}"
   -o "&:with_redisstreams=${CPPCOROSERVICELIB_ENABLE_REDISSTREAMS:-False}"

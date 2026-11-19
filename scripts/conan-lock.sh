@@ -17,6 +17,8 @@ mkdir -p "$lock_dir"
 "$root/scripts/conan-export-recipes.sh"
 
 options=(
+  -o "&:with_s3=True"
+  -o "&:with_postgresql=True"
   -o "&:with_grpc=True"
   -o "&:with_kafka=True"
   -o "&:with_otel=True"
@@ -28,11 +30,17 @@ options=(
 for profile in "$root"/conan/profiles/*; do
   [[ -f "$profile" ]] || continue
   output="$lock_dir/$(basename "$profile").lock"
+  # Add optional connector dependencies without upgrading the existing graph.
+  lock_args=()
+  if [[ -f "$output" ]]; then
+    lock_args=(--lockfile "$output" --lockfile-partial)
+  fi
   conan lock create "$root" \
     --profile:host "$profile" \
     --profile:build "$profile" \
     -s:h build_type=Release \
     -s:b build_type=Release \
     "${options[@]}" \
+    "${lock_args[@]}" \
     --lockfile-out "$output"
 done

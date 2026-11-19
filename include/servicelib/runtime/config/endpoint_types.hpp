@@ -16,6 +16,7 @@
 #include <servicelib/runtime/config/nats.hpp>
 #include <servicelib/runtime/config/pulsar.hpp>
 #include <servicelib/runtime/config/redisstreams.hpp>
+#include <servicelib/runtime/config/query.hpp>
 #include <servicelib/api/serviceapi_parse.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>
 
@@ -176,6 +177,7 @@ struct CustomEndpointConfig {
 class EndpointConfigRef {
  public:
   using Variant = std::variant<
+      std::reference_wrapper<const QueryEndpointConfig>,
       std::reference_wrapper<const HttpEndpointConfig>,
       std::reference_wrapper<const GrpcEndpointConfig>,
       std::reference_wrapper<const NatsEndpointConfig>,
@@ -195,6 +197,7 @@ class EndpointConfigRef {
   }
 
  public:
+  EndpointConfigRef(const QueryEndpointConfig& v) : value_(std::cref(v)) {}
   EndpointConfigRef(const HttpEndpointConfig& v)   : value_(std::cref(v)) {}
   EndpointConfigRef(const GrpcEndpointConfig& v)   : value_(std::cref(v)) {}
   EndpointConfigRef(const NatsEndpointConfig& v) : value_(std::cref(v)) {}

@@ -16,6 +16,7 @@
 #include <servicelib/runtime/config/nats.hpp>
 #include <servicelib/runtime/config/pulsar.hpp>
 #include <servicelib/runtime/config/redisstreams.hpp>
+#include <servicelib/runtime/config/query.hpp>
 #include <servicelib/api/serviceapi_parse.hpp>
 #include <servicelib/runtime/config/config_parse_common.hpp>
 
@@ -125,6 +126,8 @@ struct CustomDataConnectorConfig {
 class DataConnectorConfigRef {
  public:
   using Variant = std::variant<
+      std::reference_wrapper<const S3AWSDataConnectorConfig>,
+      std::reference_wrapper<const PostgreSQLLibpqDataConnectorConfig>,
       std::reference_wrapper<const HttpDataConnectorConfig>,
       std::reference_wrapper<const GrpcDataConnectorConfig>,
       std::reference_wrapper<const NatsDataConnectorConfig>,
@@ -144,6 +147,8 @@ class DataConnectorConfigRef {
   }
 
  public:
+  DataConnectorConfigRef(const S3AWSDataConnectorConfig& v) : value_(std::cref(v)) {}
+  DataConnectorConfigRef(const PostgreSQLLibpqDataConnectorConfig& v) : value_(std::cref(v)) {}
   DataConnectorConfigRef(const HttpDataConnectorConfig& v)   : value_(std::cref(v)) {}
   DataConnectorConfigRef(const GrpcDataConnectorConfig& v)   : value_(std::cref(v)) {}
   DataConnectorConfigRef(const NatsDataConnectorConfig& v) : value_(std::cref(v)) {}

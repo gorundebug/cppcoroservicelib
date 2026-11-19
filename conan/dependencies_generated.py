@@ -9,6 +9,7 @@ VERSIONS = {
     "grpc": "1.83.1",
     "jemalloc": "5.3.1",
     "libcron": "1.3.3",
+    "libpq": "15.19",
     "librdkafka": "2.8.0",
     "openssl": "3.6.3",
     "opentelemetry-cpp": "1.20.0",

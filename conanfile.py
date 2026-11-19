@@ -31,6 +31,8 @@ class CppCoroServiceLibConan(ConanFile):
         "with_grpc": [True, False],
         "with_kafka": [True, False],
         "with_nats": [True, False],
+        "with_s3": [True, False],
+        "with_postgresql": [True, False],
         "with_pulsar": [True, False],
         "with_redisstreams": [True, False],
         "with_otel": [True, False],
@@ -44,6 +46,8 @@ class CppCoroServiceLibConan(ConanFile):
         "with_grpc": False,
         "with_kafka": False,
         "with_nats": False,
+        "with_s3": False,
+        "with_postgresql": False,
         "with_pulsar": False,
         "with_redisstreams": False,
         "with_otel": False,
@@ -101,6 +105,22 @@ class CppCoroServiceLibConan(ConanFile):
         self.options["opentelemetry-cpp"].with_zipkin = False
 
     def requirements(self):
+        if self.options.with_postgresql:
+            # libpq defaults to a build without TLS; Query must support verified
+            # PostgreSQL connections through the native sslmode/sslrootcert API.
+            self.requires(f"libpq/{VERSIONS['libpq']}", options={"with_openssl": True})
+        if self.options.with_s3:
+            self.requires("aws-sdk-cpp/1.11.915", options={
+                "s3": True,
+                "monitoring": False,
+                "access-management": False,
+                "identity-management": False,
+                "queues": False,
+                "s3-encryption": False,
+                "text-to-speech": False,
+                "transfer": False,
+                "s3-transfer": False,
+            })
         self.requires(f"boost/{VERSIONS['boost']}", override=True)
         self.requires(f"yaml-cpp/{VERSIONS['yaml-cpp']}")
         # Both HTTP and gRPC DNS use the same event-driven c-ares channel.
@@ -168,6 +188,8 @@ class CppCoroServiceLibConan(ConanFile):
         toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_NATS"] = bool(self.options.with_nats)
         toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_PULSAR"] = bool(self.options.with_pulsar)
         toolchain.cache_variables["CPPCOROSERVICELIB_ENABLE_REDISSTREAMS"] = bool(self.options.with_redisstreams)
+        toolchain.cache_variables["SERVICELIB_ENABLE_S3"] = bool(self.options.with_s3)
+        toolchain.cache_variables["SERVICELIB_ENABLE_POSTGRESQL"] = bool(self.options.with_postgresql)
         toolchain.generate()
 
     def build(self):

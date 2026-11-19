@@ -72,7 +72,8 @@ inline constexpr std::array kTransformationTypeMap{
     std::pair{"Error"sv, TransformationType::kError},
     std::pair{"Delay"sv, TransformationType::kDelay},
     std::pair{"When"sv, TransformationType::kWhen},
-    std::pair{"SubStream"sv, TransformationType::kSubStream}};
+    std::pair{"SubStream"sv, TransformationType::kSubStream},
+    std::pair{"Query"sv, TransformationType::kQuery}};
 
 inline TransformationType Parse(const config::YamlValue& value,
                          config::TypeTag<TransformationType>) {
@@ -145,7 +146,15 @@ inline constexpr std::array kDataConnectorTypeMap{
     std::pair{"JetStream"sv, DataConnectorType::kJetStream},
     std::pair{"RabbitMQ"sv, DataConnectorType::kRabbitMQ},
     std::pair{"RedisStreams"sv, DataConnectorType::kRedisStreams},
-    std::pair{"Pulsar"sv, DataConnectorType::kPulsar}};
+    std::pair{"Pulsar"sv, DataConnectorType::kPulsar},
+    std::pair{"PostgreSQLBun"sv, DataConnectorType::kPostgreSQLBun},
+    std::pair{"PostgreSQLKysely"sv, DataConnectorType::kPostgreSQLKysely},
+    std::pair{"PostgreSQLSQLAlchemy"sv, DataConnectorType::kPostgreSQLSQLAlchemy},
+    std::pair{"PostgreSQLSQLx"sv, DataConnectorType::kPostgreSQLSQLx},
+    std::pair{"PostgreSQLUserver"sv, DataConnectorType::kPostgreSQLUserver},
+    std::pair{"PostgreSQLLibpq"sv, DataConnectorType::kPostgreSQLLibpq},
+    std::pair{"S3AWS"sv, DataConnectorType::kS3AWS},
+    std::pair{"S3Userver"sv, DataConnectorType::kS3Userver}};
 
 inline DataConnectorType Parse(const config::YamlValue& value,
                          config::TypeTag<DataConnectorType>) {
@@ -259,7 +268,16 @@ inline constexpr std::array kDataConnectorImplementationMap{
     std::pair{"pulsar-client-go"sv, DataConnectorImplementation::kPulsarGo},
     std::pair{"pulsar-client-python"sv, DataConnectorImplementation::kPulsarPython},
     std::pair{"pulsar-client-node"sv, DataConnectorImplementation::kPulsarNode},
-    std::pair{"pulsar-client-cpp"sv, DataConnectorImplementation::kPulsarCpp}};
+    std::pair{"pulsar-client-cpp"sv, DataConnectorImplementation::kPulsarCpp},
+    std::pair{"go/bun"sv, DataConnectorImplementation::kGoBun},
+    std::pair{"python/sqlalchemy"sv, DataConnectorImplementation::kPythonSQLAlchemy},
+    std::pair{"node/kysely"sv, DataConnectorImplementation::kNodeKysely},
+    std::pair{"rust/sqlx"sv, DataConnectorImplementation::kRustSQLx},
+    std::pair{"go/aws"sv, DataConnectorImplementation::kGoAWS},
+    std::pair{"node/aws"sv, DataConnectorImplementation::kNodeAWS},
+    std::pair{"python/aiobotocore"sv, DataConnectorImplementation::kPythonAiobotocore},
+    std::pair{"userver/postgresql"sv, DataConnectorImplementation::kUserverPostgreSQL},
+    std::pair{"libpq"sv, DataConnectorImplementation::kLibpq}};
 
 inline DataConnectorImplementation Parse(const config::YamlValue& value,
                          config::TypeTag<DataConnectorImplementation>) {
